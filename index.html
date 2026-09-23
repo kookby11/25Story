@@ -519,9 +519,9 @@
 
 <script>
 // ========= CONFIG =========
-const API_KEY = '***************************************';
+const API_KEY = 'ใส่ API Key ของคุณที่นี่';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
-const DEFAULT_PASSWORD = '*******';
+const DEFAULT_PASSWORD = 'bws2026';
 const POLL_MS = 5000;
 let FOLDER_ID = null;
 let currentFiles = [];
@@ -591,4 +591,754 @@ function showBanner(kind, text){ statusBanner.className = 'status-banner show ' 
 function hideBanner(){ statusBanner.className = 'status-banner'; }
 
 function showToast(msg){
-  const t = document.
+  const t = document.getElementById('toastBanner');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function updateLiveStatus(online, notConfigured){
+  const dot = document.getElementById('liveDot');
+  const text = document.getElementById('liveStatusText');
+  if(!dot || !text) return;
+  const t = STRINGS[lang];
+  if(notConfigured){
+    dot.classList.add('offline');
+    text.textContent = t.liveNoAlbum;
+    return;
+  }
+  lastLiveOnline = online;
+  const now = new Date().toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  if(online){
+    dot.classList.remove('offline');
+    text.textContent = t.liveOn + now;
+  } else {
+    dot.classList.add('offline');
+    text.textContent = t.liveOff;
+  }
+}
+
+async function fetchDriveFiles(){
+  const q = encodeURIComponent(`'${FOLDER_ID}' in parents and mimeType contains 'image/' and trashed = false`);
+  const orderBy = encodeURIComponent('createdTime desc');
+  let allFiles = [];
+  let pageToken = '';
+  do {
+    const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=${orderBy}&pageSize=1000&fields=nextPageToken,files(id,name,createdTime)&key=${API_KEY}${tokenParam}`;
+    const res = await fetch(url);
+    if(!res.ok){
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body?.error?.message || ('HTTP ' + res.status));
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    allFiles = allFiles.concat(data.files || []);
+    pageToken = data.nextPageToken || '';
+  } while(pageToken);
+  return allFiles;
+}
+
+function formatUpdated(files){
+  if(files.length === 0) return '—';
+  const latest = files.reduce((a,b) => new Date(a.createdTime) > new Date(b.createdTime) ? a : b);
+  return new Date(latest.createdTime).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour:'2-digit', minute:'2-digit' });
+}
+
+function renderMeta(files){
+  const dateText = eventDateValue || '—';
+  const t = STRINGS[lang];
+  eventMeta.textContent = `${dateText} · ${files.length} ${t.photosWord} · ${t.updated} ${formatUpdated(files)}`;
+}
+
+function updateSelectAllLabel(){
+  if(!selectAllBtn) return;
+  const t = STRINGS[lang];
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  selectAllBtn.textContent = allSelected ? t.deselectAll : t.selectAll;
+}
+
+function renderGrid(files, newIds){
+  grid.innerHTML = '';
+  if(files.length === 0){
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = lang === 'th' ? 'ยังไม่มีรูปในโฟลเดอร์นี้' : 'No photos in this folder yet';
+    grid.appendChild(note);
+    return;
+  }
+  const newSet = new Set(newIds || []);
+  const t = STRINGS[lang];
+  files.forEach((f, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (selectedIds.has(f.id) ? ' selected' : '') + (newSet.has(f.id) ? ' new-cell' : '');
+    cell.dataset.id = f.id;
+    const img = document.createElement('img');
+    img.decoding = 'async';
+    if(i < 10){
+      img.loading = 'eager';
+      img.setAttribute('fetchpriority', 'high');
+    } else {
+      img.loading = 'lazy';
+    }
+    img.addEventListener('load', () => img.classList.add('loaded'));
+    img.src = thumbUrl(f.id, 400);
+    img.alt = f.name || '';
+    cell.appendChild(img);
+    const badge = document.createElement('div');
+    badge.className = 'badge';
+    badge.textContent = String(i + 1).padStart(2, '0');
+    cell.appendChild(badge);
+    if(newSet.has(f.id)){
+      const newTag = document.createElement('div');
+      newTag.className = 'new-tag';
+      newTag.textContent = t.newBadge;
+      cell.appendChild(newTag);
+    }
+    const check = document.createElement('div');
+    check.className = 'check';
+    check.textContent = '✓';
+    cell.appendChild(check);
+    cell.addEventListener('click', () => { selectMode ? toggleSelect(f.id, cell) : openLightbox(i); });
+    grid.appendChild(cell);
+  });
+  updateSelectAllLabel();
+}
+
+function toggleSelect(id, cell){
+  if(selectedIds.has(id)){ selectedIds.delete(id); cell.classList.remove('selected'); }
+  else { selectedIds.add(id); cell.classList.add('selected'); }
+  updateSelectAllLabel();
+}
+
+selectAllBtn.addEventListener('click', () => {
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  if(allSelected){
+    selectedIds.clear();
+  } else {
+    currentFiles.forEach(f => selectedIds.add(f.id));
+  }
+  renderGrid(currentFiles);
+});
+
+function renderHero(){
+  const heroImg = document.getElementById('heroImg');
+  const heroPlaceholder = document.getElementById('heroPlaceholder');
+  if(heroFileId){
+    heroImg.src = thumbUrl(heroFileId, 1000);
+    heroImg.style.display = 'block';
+    heroPlaceholder.style.display = 'none';
+  } else {
+    heroImg.style.display = 'none';
+    heroPlaceholder.style.display = 'flex';
+  }
+}
+
+function renderAdminPreview(files){
+  const adminGrid = document.getElementById('adminPhotoGrid');
+  adminGrid.innerHTML = '';
+  files.forEach(f => {
+    const cell = document.createElement('div');
+    cell.className = 'admin-photo-cell' + (f.id === heroFileId ? ' selected' : '');
+    cell.dataset.id = f.id;
+    const img = document.createElement('img');
+    img.src = thumbUrl(f.id, 200);
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    cell.appendChild(img);
+    cell.addEventListener('click', () => {
+      heroFileId = f.id;
+      document.querySelectorAll('.admin-photo-cell').forEach(c => c.classList.remove('selected'));
+      cell.classList.add('selected');
+      document.getElementById('coverSaveStatus').textContent = '';
+    });
+    adminGrid.appendChild(cell);
+  });
+}
+
+async function refresh(){
+  if(!FOLDER_ID){
+    currentFiles = [];
+    renderMeta([]);
+    grid.innerHTML = '';
+    const note = document.createElement('div');
+    note.className = 'empty-note';
+    note.textContent = lang === 'th' ? 'ยังไม่ได้ตั้งค่าอัลบั้ม Google Drive — ทีมงานเข้าหลังบ้านเพื่อเลือกอัลบั้ม' : 'No Google Drive album set yet — staff can pick one in the admin panel';
+    grid.appendChild(note);
+    renderAdminPreview([]);
+    showBanner('loading', lang==='th' ? 'ยังไม่ได้ตั้งค่าอัลบั้ม Google Drive' : 'No Google Drive album set yet');
+    updateLiveStatus(false, true);
+    return;
+  }
+  try{
+    const files = await fetchDriveFiles();
+    const newOnes = isFirstLoad ? [] : files.filter(f => !knownFileIds.has(f.id));
+    knownFileIds = new Set(files.map(f => f.id));
+    currentFiles = files;
+    renderMeta(files);
+    renderGrid(files, newOnes.map(f => f.id));
+    renderAdminPreview(files);
+    hideBanner();
+    updateLiveStatus(true);
+    if(!isFirstLoad && newOnes.length > 0){
+      showToast(lang==='th' ? `📸 มีรูปใหม่เข้ามา ${newOnes.length} รูป` : `📸 ${newOnes.length} new photo(s) added`);
+    }
+    isFirstLoad = false;
+  }catch(err){
+    updateLiveStatus(false);
+    if(err.status === 403){
+      showBanner('error', lang==='th' ? 'เชื่อมต่อไม่ได้ (403) — ตรวจสอบการแชร์โฟลเดอร์และสิทธิ์ API Key' : 'Connection failed (403) — check folder sharing and API key permissions');
+    } else if(err.status === 400){
+      showBanner('error', (lang==='th' ? 'คำขอไม่ถูกต้อง (400): ' : 'Bad request (400): ') + err.message);
+    } else {
+      showBanner('error', (lang==='th' ? 'ดึงข้อมูลไม่สำเร็จ: ' : 'Fetch failed: ') + err.message);
+    }
+  }
+}
+
+// ---- lightbox ----
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+const lightboxQr = document.getElementById('lightboxQr');
+const lightboxQrLabel = document.getElementById('lightboxQrLabel');
+const lightboxPrev = document.getElementById('lightboxPrev');
+const lightboxNext = document.getElementById('lightboxNext');
+let lightboxIndex = -1;
+document.getElementById('lightboxClose').addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', (e) => { if(e.target===lightbox) closeLightbox(); });
+
+function showLightboxAt(index){
+  if(currentFiles.length === 0) return;
+  if(index < 0) index = currentFiles.length - 1;
+  if(index >= currentFiles.length) index = 0;
+  lightboxIndex = index;
+  const f = currentFiles[index];
+
+  lightboxImg.src = thumbUrl(f.id, 400);
+  const hiRes = new Image();
+  hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
+  hiRes.src = thumbUrl(f.id, 1200);
+
+  lightboxQr.innerHTML = '';
+  lightboxQrLabel.textContent = STRINGS[lang].scanSave;
+  const viewLink = `https://drive.google.com/file/d/${f.id}/view`;
+  if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
+  lightbox.classList.add('open');
+
+  [index - 1, index + 1].forEach(ni => {
+    if(ni < 0 || ni >= currentFiles.length) return;
+    const nf = currentFiles[ni];
+    new Image().src = thumbUrl(nf.id, 400);
+    new Image().src = thumbUrl(nf.id, 1200);
+  });
+}
+function openLightbox(index){ showLightboxAt(index); }
+function closeLightbox(){ lightbox.classList.remove('open'); lightboxImg.src=''; lightboxIndex = -1; }
+lightboxPrev.addEventListener('click', (e) => { e.stopPropagation(); showLightboxAt(lightboxIndex - 1); });
+lightboxNext.addEventListener('click', (e) => { e.stopPropagation(); showLightboxAt(lightboxIndex + 1); });
+
+// ---- QR modal ----
+const qrModal = document.getElementById('qrModal');
+const qrModalHolder = document.getElementById('qrModalHolder');
+document.getElementById('qrModalClose').addEventListener('click', closeQrModal);
+qrModal.addEventListener('click', (e) => { if(e.target===qrModal) closeQrModal(); });
+btnQr.addEventListener('click', openQrModal);
+function openQrModal(){
+  qrModalHolder.innerHTML = '';
+  const pageUrl = window.location.href.split('?')[0];
+  if(window.QRCode){ new QRCode(qrModalHolder, { text: pageUrl, width:160, height:160, colorDark:'#2B2823', colorLight:'#ffffff' }); }
+  qrModal.classList.add('open');
+}
+function closeQrModal(){ qrModal.classList.remove('open'); }
+
+document.addEventListener('keydown', (e) => {
+  if(e.key==='Escape'){ closeLightbox(); closeQrModal(); closeLoginModal(); }
+  if(lightbox.classList.contains('open')){
+    if(e.key==='ArrowLeft') showLightboxAt(lightboxIndex - 1);
+    if(e.key==='ArrowRight') showLightboxAt(lightboxIndex + 1);
+  }
+});
+
+// ---- select + download ----
+btnSelect.addEventListener('click', () => {
+  selectMode = !selectMode;
+  grid.classList.toggle('select-mode', selectMode);
+  btnSelect.classList.toggle('active-toggle', selectMode);
+  lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
+  selectAllBtn.style.display = selectMode ? 'inline-block' : 'none';
+  if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
+  else { updateSelectAllLabel(); }
+});
+const downloadModal = document.getElementById('downloadModal');
+document.getElementById('downloadModalClose').addEventListener('click', () => downloadModal.classList.remove('open'));
+downloadModal.addEventListener('click', (e) => { if(e.target===downloadModal) downloadModal.classList.remove('open'); });
+
+async function startDownloads(ids){
+  const files = ids.map(id => currentFiles.find(f => f.id === id)).filter(Boolean);
+  if(files.length === 0) return;
+  const listEl = document.getElementById('downloadList');
+  const progressEl = document.getElementById('downloadProgressText');
+  listEl.innerHTML = '';
+  const rows = files.map((f, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:11px;';
+    const img = document.createElement('img');
+    img.src = thumbUrl(f.id, 80);
+    img.style.cssText = 'width:32px;height:32px;border-radius:6px;object-fit:cover;flex-shrink:0;';
+    const label = document.createElement('span');
+    label.style.flex = '1';
+    label.textContent = `รูปที่ ${i + 1}`;
+    const status = document.createElement('span');
+    status.className = 'dl-status';
+    status.textContent = '⏳';
+    row.appendChild(img); row.appendChild(label); row.appendChild(status);
+    listEl.appendChild(row);
+    return { row, status };
+  });
+  progressEl.textContent = `กำลังรวบรวมรูป 0 / ${files.length}...`;
+  document.getElementById('manualDownloadLink').style.display = 'none';
+  downloadModal.classList.add('open');
+
+  let doneCount = 0;
+  let failCount = 0;
+  const fetchedFiles = await Promise.all(files.map(async (f, i) => {
+    try{
+      const mediaUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media&key=${API_KEY}`;
+      const res = await fetch(mediaUrl);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const ext = (blob.type && blob.type.includes('png')) ? 'png' : 'jpg';
+      rows[i].status.textContent = '✓';
+      doneCount++;
+      progressEl.textContent = `กำลังรวบรวมรูป ${doneCount + failCount} / ${files.length}...`;
+      return new File([blob], `รูปที่${i + 1}.${ext}`, { type: blob.type || 'image/jpeg' });
+    }catch(err){
+      rows[i].status.textContent = '✗';
+      failCount++;
+      progressEl.textContent = `กำลังรวบรวมรูป ${doneCount + failCount} / ${files.length}...`;
+      return null;
+    }
+  }));
+  const validFiles = fetchedFiles.filter(Boolean);
+
+  if(validFiles.length === 0){
+    progressEl.textContent = 'ดาวน์โหลดไม่สำเร็จเลย — ลองใหม่อีกครั้ง หรือดาวน์โหลดทีละรูปจากหน้าดูรูป';
+    return;
+  }
+
+  const canUseShare = !!(navigator.canShare && navigator.canShare({ files: validFiles }));
+  let shareSucceeded = false;
+
+  if(canUseShare){
+    progressEl.textContent = 'เปิดหน้าต่างบันทึกรูป — เลือก "บันทึกรูปภาพ" เพื่อเก็บเข้าคลังภาพ';
+    try{
+      await navigator.share({ files: validFiles, title: 'รูปจากงานแต่งงาน' });
+      progressEl.textContent = `ส่ง ${validFiles.length} รูปไปยังหน้าต่างบันทึกแล้ว`;
+      shareSucceeded = true;
+    }catch(err){
+      if(err && err.name === 'AbortError'){
+        progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
+        return;
+      }
+      progressEl.textContent = 'เปิดหน้าต่างบันทึกไม่สำเร็จ กำลังเตรียมไฟล์ ZIP แทน...';
+    }
+  }
+
+  if(shareSucceeded) return;
+
+  progressEl.textContent = 'กำลังบีบอัดเป็นไฟล์ ZIP...';
+  const zip = new JSZip();
+  validFiles.forEach(f => zip.file(f.name, f));
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const zipUrl = URL.createObjectURL(zipBlob);
+  const zipName = `bangkok-wedding-photos-${validFiles.length}-รูป.zip`;
+
+  const a = document.createElement('a');
+  a.href = zipUrl;
+  a.download = zipName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  const manualLink = document.getElementById('manualDownloadLink');
+  manualLink.href = zipUrl;
+  manualLink.download = zipName;
+  manualLink.style.display = 'inline-block';
+
+  progressEl.textContent = failCount > 0
+    ? `เสร็จสิ้น ${doneCount}/${files.length} รูป (พลาด ${failCount} รูป) — ไฟล์ ZIP พร้อมแล้ว`
+    : `เสร็จสิ้นครบ ${doneCount} รูป — ไฟล์ ZIP พร้อมแล้ว`;
+}
+
+btnDownload.addEventListener('click', () => {
+  if(selectedIds.size === 0){
+    showBanner('loading', STRINGS[lang].pickSelectFirst);
+    setTimeout(hideBanner, 2500);
+    return;
+  }
+  startDownloads(Array.from(selectedIds));
+});
+
+// ---- view density ----
+let dense = false;
+viewToggle.addEventListener('click', () => { dense = !dense; grid.classList.toggle('dense', dense); });
+
+// ---- light / dark ----
+themeToggle.addEventListener('click', () => {
+  document.body.classList.toggle('dark');
+  themeKnob.textContent = document.body.classList.contains('dark') ? '🌙' : '☀️';
+  saveSetting(THEME_MODE_KEY, document.body.classList.contains('dark') ? 'dark' : 'light', false);
+});
+
+// ---- language ----
+function applyLangStrings(){
+  const t = STRINGS[lang];
+  eventSub.textContent = eventSubValue || t.eventSub;
+  viewLabel.textContent = t.view;
+  lblQr.textContent = t.qr;
+  lblDownload.textContent = t.download;
+  lblSelect.textContent = selectMode ? t.doneSelect : t.select;
+  lblLang.textContent = t.lang;
+  langPillTop.textContent = t.langBtn;
+  loginBtnLabel.textContent = t.login;
+  document.getElementById('qrModalTitle').textContent = t.qrTitle;
+  document.getElementById('qrModalHint').textContent = t.qrHint;
+  renderMeta(currentFiles);
+  renderGrid(currentFiles);
+  updateSelectAllLabel();
+  if(lastLiveOnline !== null) updateLiveStatus(lastLiveOnline);
+}
+function toggleLang(){
+  lang = lang === 'th' ? 'en' : 'th';
+  applyLangStrings();
+  saveSetting(LANG_KEY, lang, false);
+}
+langPillTop.addEventListener('click', toggleLang);
+btnLang.addEventListener('click', toggleLang);
+
+// ---- accent color ----
+function darken(hex, amount){
+  const c = hex.replace('#','');
+  const num = parseInt(c, 16);
+  let r=(num>>16)-amount, g=((num>>8)&0x00FF)-amount, b=(num&0x0000FF)-amount;
+  r=Math.max(0,r); g=Math.max(0,g); b=Math.max(0,b);
+  return '#'+(r<<16|g<<8|b).toString(16).padStart(6,'0');
+}
+function hexToRgba(hex, alpha){
+  const c = hex.replace('#','');
+  const num = parseInt(c,16);
+  const r=(num>>16)&0xFF, g=(num>>8)&0xFF, b=num&0xFF;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+function applyAccent(color){
+  document.documentElement.style.setProperty('--accent', color);
+  document.documentElement.style.setProperty('--accent-soft', hexToRgba(color, 0.16));
+  document.querySelectorAll('.swatch[data-color]').forEach(s => {
+    if(s.closest('#swatchRow')) s.classList.toggle('selected', s.dataset.color.toLowerCase()===color.toLowerCase());
+  });
+  const custom = document.getElementById('customColorInput'); if(custom) custom.value = color;
+}
+function applyBg(color){
+  document.documentElement.style.setProperty('--bg', color);
+  document.querySelectorAll('.swatch[data-color]').forEach(s => {
+    if(s.closest('#bgSwatchRow')) s.classList.toggle('selected', s.dataset.color.toLowerCase()===color.toLowerCase());
+  });
+  const custom = document.getElementById('customBgInput'); if(custom) custom.value = color;
+}
+const swatchRow = document.getElementById('swatchRow');
+THEME_PRESETS.forEach(t => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch';
+  sw.style.background = t.color;
+  sw.dataset.color = t.color;
+  sw.title = t.name;
+  sw.addEventListener('click', () => applyAccent(t.color));
+  swatchRow.insertBefore(sw, swatchRow.lastElementChild);
+});
+document.getElementById('customColorInput').addEventListener('input', (e) => applyAccent(e.target.value));
+
+const bgSwatchRow = document.getElementById('bgSwatchRow');
+BG_PRESETS.forEach(t => {
+  const sw = document.createElement('div');
+  sw.className = 'swatch';
+  sw.style.background = t.color;
+  sw.dataset.color = t.color;
+  sw.title = t.name;
+  sw.addEventListener('click', () => applyBg(t.color));
+  bgSwatchRow.insertBefore(sw, bgSwatchRow.lastElementChild);
+});
+document.getElementById('customBgInput').addEventListener('input', (e) => applyBg(e.target.value));
+
+document.getElementById('saveColorsBtn').addEventListener('click', async () => {
+  const status = document.getElementById('colorsSaveStatus');
+  status.textContent = 'กำลังบันทึก...';
+  const accentColor = document.getElementById('customColorInput').value;
+  const bgColor = document.getElementById('customBgInput').value;
+  await Promise.all([
+    saveSetting(ACCENT_KEY, accentColor),
+    saveSetting(BG_KEY, bgColor),
+  ]);
+  status.textContent = 'บันทึกแล้ว ✓';
+});
+
+// ---- font picker ----
+const fontSelect = document.getElementById('fontSelect');
+const fontPreview = document.getElementById('fontPreview');
+fontSelect.addEventListener('change', () => {
+  fontPreview.style.fontFamily = fontSelect.value;
+  document.documentElement.style.setProperty('--couple-font', fontSelect.value);
+});
+
+// ---- logo upload (>1MB + auto resize/compress) ----
+document.getElementById('logoFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const MAX_RAW_SIZE = 8 * 1024 * 1024;
+  if(file.size > MAX_RAW_SIZE){
+    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 8MB' : 'File too large, please use an image under 8MB');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = async () => {
+      const MAX_DIM = 640;
+      let { width, height } = img;
+      if(width > MAX_DIM || height > MAX_DIM){
+        if(width > height){ height = Math.round(height * (MAX_DIM / width)); width = MAX_DIM; }
+        else { width = Math.round(width * (MAX_DIM / height)); height = MAX_DIM; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      document.getElementById('logoPreview').innerHTML = `<img src="${dataUrl}">`;
+      applyLogo(dataUrl);
+      await saveSetting(LOGO_KEY, dataUrl, true);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+function applyLogo(dataUrl){
+  if(dataUrl){ logoCircle.innerHTML = `<img src="${dataUrl}">`; }
+}
+
+// ---- shared/local persisted settings ----
+const BRAND_KEY = 'bws-gallery2:brand-name';
+const EVENT_SUB_KEY = 'bws-gallery2:event-sub';
+const COUPLE_KEY = 'bws-gallery2:couple-names';
+const EVENT_DATE_KEY = 'bws-gallery2:event-date';
+const FOLDER_KEY = 'bws-gallery2:drive-folder-id';
+const THEME_MODE_KEY = 'bws-gallery2:theme-mode';
+const LANG_KEY = 'bws-gallery2:lang';
+const ACCENT_KEY = 'bws-gallery2:accent-color';
+const BG_KEY = 'bws-gallery2:bg-color';
+const LOGO_KEY = 'bws-gallery2:logo-data-url';
+const FONT_KEY = 'bws-gallery2:couple-font';
+const PASSWORD_KEY = 'bws-gallery2:admin-password';
+const COVER_KEY = 'bws-gallery2:cover-photo-id';
+
+let eventSubValue = '';
+let eventDateValue = '';
+let heroFileId = null;
+
+async function saveSetting(key, value){
+  try{
+    const url = `${FIREBASE_DB_URL}/${encodeURIComponent(key)}.json`;
+    await fetch(url, { method:'PUT', body: JSON.stringify(value) });
+  }catch(err){ /* offline or Firebase unreachable — fails silently */ }
+}
+async function loadSetting(key){
+  try{
+    const url = `${FIREBASE_DB_URL}/${encodeURIComponent(key)}.json`;
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    return await res.json();
+  }catch(err){ return null; }
+}
+
+function parseFolderId(input){
+  const trimmed = (input || '').trim();
+  if(!trimmed) return null;
+  let m = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if(m) return m[1];
+  m = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if(m) return m[1];
+  if(/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+async function loadAllSettings(){
+  const [brand, sub, couple, date, folder, theme, savedLang, accent, logo, font, cover, bg] = await Promise.all([
+    loadSetting(BRAND_KEY, true), loadSetting(EVENT_SUB_KEY, true), loadSetting(COUPLE_KEY, true),
+    loadSetting(EVENT_DATE_KEY, true), loadSetting(FOLDER_KEY, true), loadSetting(THEME_MODE_KEY, false),
+    loadSetting(LANG_KEY, false), loadSetting(ACCENT_KEY, true), loadSetting(LOGO_KEY, true), loadSetting(FONT_KEY, true),
+    loadSetting(COVER_KEY, true), loadSetting(BG_KEY, true),
+  ]);
+
+  if(cover){ heroFileId = cover; }
+  renderHero();
+
+  if(brand){ logoLetter.textContent = brand.trim().charAt(0).toUpperCase(); }
+  if(sub) eventSubValue = sub;
+  if(couple) eventTitle.textContent = couple;
+  if(date) eventDateValue = date;
+  FOLDER_ID = folder || null;
+  if(theme === 'dark'){ document.body.classList.add('dark'); themeKnob.textContent = '🌙'; }
+  if(savedLang === 'en' || savedLang === 'th') lang = savedLang;
+  if(accent) applyAccent(accent); else applyAccent(THEME_PRESETS[0].color);
+  if(bg) applyBg(bg); else applyBg(BG_PRESETS[0].color);
+  if(logo) applyLogo(logo);
+  if(font){ document.documentElement.style.setProperty('--couple-font', font); }
+
+  const ib = document.getElementById('inputBrand'); if(ib) ib.value = brand || '';
+  const isub = document.getElementById('inputEventSub'); if(isub) isub.value = sub || '';
+  const icn = document.getElementById('inputCoupleNames'); if(icn) icn.value = couple || '';
+  const ied = document.getElementById('inputEventDate'); if(ied) ied.value = date || '';
+  const fi = document.getElementById('folderInput'); if(fi) fi.value = folder ? `https://drive.google.com/drive/folders/${folder}` : '';
+  if(logo) document.getElementById('logoPreview').innerHTML = `<img src="${logo}">`;
+  if(font){ fontSelect.value = font; fontPreview.style.fontFamily = font; }
+
+  applyLangStrings();
+}
+
+// ---- admin field save handlers ----
+document.getElementById('saveBrandBtn').addEventListener('click', async () => {
+  const brand = document.getElementById('inputBrand').value.trim();
+  const status = document.getElementById('brandSaveStatus');
+  status.textContent = 'กำลังบันทึก...';
+  await saveSetting(BRAND_KEY, brand, true);
+  if(brand){ if(!document.getElementById('logoPreview').querySelector('img')) logoLetter.textContent = brand.charAt(0).toUpperCase(); }
+  status.textContent = 'บันทึกแล้ว ✓';
+});
+
+document.getElementById('saveEventBtn').addEventListener('click', async () => {
+  const sub = document.getElementById('inputEventSub').value.trim();
+  const couple = document.getElementById('inputCoupleNames').value.trim();
+  const date = document.getElementById('inputEventDate').value.trim();
+  const font = fontSelect.value;
+  const status = document.getElementById('eventSaveStatus');
+  status.textContent = 'กำลังบันทึก...';
+  await Promise.all([
+    saveSetting(EVENT_SUB_KEY, sub, true),
+    saveSetting(COUPLE_KEY, couple, true),
+    saveSetting(EVENT_DATE_KEY, date, true),
+    saveSetting(FONT_KEY, font, true),
+  ]);
+  if(sub){ eventSubValue = sub; eventSub.textContent = sub; }
+  if(couple) eventTitle.textContent = couple;
+  if(date){ eventDateValue = date; renderMeta(currentFiles); }
+  status.textContent = 'บันทึกแล้ว ✓';
+});
+
+document.getElementById('coverResetBtn').addEventListener('click', async () => {
+  const status = document.getElementById('coverSaveStatus');
+  status.textContent = 'กำลังรีเซ็ต...';
+  heroFileId = null;
+  await saveSetting(COVER_KEY, null);
+  renderHero();
+  renderAdminPreview(currentFiles);
+  status.textContent = 'รีเซ็ตแล้ว ✓';
+});
+
+document.getElementById('saveCoverBtn').addEventListener('click', async () => {
+  const status = document.getElementById('coverSaveStatus');
+  status.textContent = 'กำลังบันทึก...';
+  await saveSetting(COVER_KEY, heroFileId);
+  renderHero();
+  status.textContent = 'บันทึกแล้ว ✓';
+});
+
+document.getElementById('folderResetBtn').addEventListener('click', async () => {
+  const status = document.getElementById('folderStatus');
+  status.style.color = '';
+  status.textContent = 'กำลังรีเซ็ต...';
+  await saveSetting(FOLDER_KEY, null);
+  FOLDER_ID = null;
+  document.getElementById('folderInput').value = '';
+  await refresh();
+  status.textContent = 'รีเซ็ตแล้ว — ยังไม่มีอัลบั้มตั้งค่าไว้';
+});
+
+document.getElementById('folderSaveBtn').addEventListener('click', async () => {
+  const folderInput = document.getElementById('folderInput');
+  const status = document.getElementById('folderStatus');
+  const parsed = parseFolderId(folderInput.value);
+  if(!parsed){ status.style.color='var(--err)'; status.textContent='ลิงก์ไม่ถูกต้อง'; return; }
+  status.style.color=''; status.textContent='กำลังบันทึก...';
+  isFirstLoad = true;
+  knownFileIds = new Set();
+  await saveSetting(FOLDER_KEY, parsed, true);
+  FOLDER_ID = parsed;
+  await refresh();
+  status.textContent = 'บันทึกแล้ว ✓ โหลดรูปใหม่แล้ว';
+});
+
+document.getElementById('savePasswordBtn').addEventListener('click', async () => {
+  const val = document.getElementById('newPasswordInput').value.trim();
+  const status = document.getElementById('passwordSaveStatus');
+  if(!val){ status.style.color='var(--err)'; status.textContent='กรอกรหัสผ่านใหม่ก่อน'; return; }
+  status.style.color=''; status.textContent='กำลังบันทึก...';
+  await saveSetting(PASSWORD_KEY, val, true);
+  document.getElementById('newPasswordInput').value = '';
+  status.textContent = 'เปลี่ยนรหัสผ่านแล้ว ✓';
+});
+
+// ---- login / admin view toggling ----
+const guestPage = document.getElementById('guestPage');
+const bottomToolbar = document.getElementById('bottomToolbar');
+const adminWrap = document.getElementById('adminWrap');
+const loginModal = document.getElementById('loginModal');
+const loginPasswordInput = document.getElementById('loginPasswordInput');
+const loginError = document.getElementById('loginError');
+
+document.getElementById('loginOpenBtn').addEventListener('click', () => {
+  loginError.classList.remove('show');
+  loginPasswordInput.value = '';
+  loginModal.classList.add('open');
+});
+document.getElementById('loginModalClose').addEventListener('click', closeLoginModal);
+loginModal.addEventListener('click', (e) => { if(e.target===loginModal) closeLoginModal(); });
+function closeLoginModal(){ loginModal.classList.remove('open'); }
+
+document.getElementById('loginSubmitBtn').addEventListener('click', async () => {
+  const entered = loginPasswordInput.value;
+  const savedPassword = await loadSetting(PASSWORD_KEY, true);
+  const correctPassword = savedPassword || DEFAULT_PASSWORD;
+  if(entered === correctPassword){
+    closeLoginModal();
+    showAdmin();
+  } else {
+    loginError.classList.add('show');
+  }
+});
+loginPasswordInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') document.getElementById('loginSubmitBtn').click(); });
+
+function showAdmin(){
+  guestPage.classList.add('hidden');
+  bottomToolbar.style.display = 'none';
+  adminWrap.classList.add('show');
+}
+function showGuest(){
+  adminWrap.classList.remove('show');
+  guestPage.classList.remove('hidden');
+  bottomToolbar.style.display = 'flex';
+}
+document.getElementById('backToGalleryBtn').addEventListener('click', showGuest);
+document.getElementById('logoutBtn').addEventListener('click', showGuest);
+
+// ---- boot ----
+showBanner('loading', lang==='th' ? 'กำลังเชื่อมต่อ Google Drive...' : 'Connecting to Google Drive...');
+(async () => {
+  await loadAllSettings();
+  await refresh();
+})();
+setInterval(refresh, POLL_MS);
+</script>
+
+</body>
+</html>
