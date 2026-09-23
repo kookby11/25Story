@@ -95,7 +95,12 @@
   }
   .event-meta{ font-size:11px; color:var(--ink-soft); }
 
-  .view-row{ display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-bottom:12px;}
+  .view-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;}
+  .realtime-indicator{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--accent); background:var(--accent-soft); padding:4px 10px; border-radius:999px; }
+  .realtime-dot{ width:8px; height:8px; background:var(--accent); border-radius:50%; animation: pulse 1.5s infinite; }
+  @keyframes pulse{ 0%{opacity:1; transform:scale(1);} 50%{opacity:0.4; transform:scale(0.85);} 100%{opacity:1; transform:scale(1);} }
+
+  .view-actions{ display:flex; align-items:center; gap:8px; }
   .view-label{ font-size:11px; font-weight:700; letter-spacing:0.08em; color:var(--ink-soft);}
   .view-toggle{
     width:34px; height:34px; border-radius:50%; background:var(--accent-soft); border:none;
@@ -108,10 +113,14 @@
   .status-banner.error{ background:#FBEAE7; color:var(--err); }
   .status-banner.loading{ background:var(--accent-soft); color:var(--ink-soft); }
 
+  .select-all-bar{ display:none; align-items:center; justify-content:space-between; background:var(--accent-soft); padding:8px 14px; border-radius:10px; margin-bottom:12px; font-size:12px; font-weight:600; color:var(--accent); }
+  .select-all-bar.show{ display:flex; }
+  .select-all-btn{ background:var(--accent); color:#fff; border:none; padding:4px 12px; border-radius:6px; cursor:pointer; font-size:11px; font-family:'Noto Serif Thai', serif; }
+
   .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; }
   .grid.dense{ grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); }
-  .cell{ position:relative; aspect-ratio:3/4; border-radius:14px; overflow:hidden; background:var(--accent-soft); cursor:pointer; }
-  .cell img{ width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.2s;}
+  .cell{ position:relative; width:100%; padding-bottom:133.33%; border-radius:14px; overflow:hidden; background:var(--accent-soft); cursor:pointer; }
+  .cell img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.2s;}
   .cell:hover img{ transform:scale(1.05); }
   .cell .badge{
     position:absolute; bottom:7px; left:7px; background:var(--chip-bg); color:#fff;
@@ -233,9 +242,9 @@
   .font-preview{ font-size:20px; margin-top:6px; color:var(--ink); }
 
   .admin-photo-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; max-height:340px; overflow-y:auto; padding-right:2px; }
-  .admin-photo-cell{ aspect-ratio:1/1; border-radius:8px; overflow:hidden; background:var(--accent-soft); cursor:pointer; border:2px solid transparent;}
+  .admin-photo-cell{ position:relative; width:100%; padding-bottom:100%; border-radius:8px; overflow:hidden; background:var(--accent-soft); cursor:pointer; border:2px solid transparent;}
   .admin-photo-cell.selected{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft);}
-  .admin-photo-cell img{ width:100%; height:100%; object-fit:cover; display:block;}
+  .admin-photo-cell img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;}
 </style>
 </head>
 <body>
@@ -267,13 +276,25 @@
     </div>
 
     <div class="view-row">
-      <span class="view-label" id="viewLabel">VIEW</span>
-      <button class="view-toggle" id="viewToggle" title="สลับความหนาแน่นของกริด">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-      </button>
+      <div class="realtime-indicator">
+        <span class="realtime-dot"></span>
+        <span id="realtimeStatusText">อัปเดตแบบเรียลไทม์</span>
+      </div>
+      <div class="view-actions">
+        <span class="view-label" id="viewLabel">VIEW</span>
+        <button class="view-toggle" id="viewToggle" title="สลับความหนาแน่นของกริด">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        </button>
+      </div>
     </div>
 
     <div class="status-banner" id="statusBanner"></div>
+    
+    <div class="select-all-bar" id="selectAllBar">
+      <span id="selectAllCountText">เลือกแล้ว 0 รูป</span>
+      <button class="select-all-btn" id="selectAllBtn">เลือกทั้งหมด</button>
+    </div>
+
     <div class="grid" id="grid"></div>
   </div>
 </div>
@@ -360,7 +381,7 @@
     <div class="logo-upload-row">
       <div class="logo-preview" id="logoPreview">B</div>
       <label class="logo-upload-btn">
-        อัพโหลดโลโก้
+        อัพโหลดโลโก้ (สูงสุด 5MB)
         <input type="file" id="logoFileInput" accept="image/*" style="display:none;">
       </label>
     </div>
@@ -468,10 +489,10 @@
 
 <script>
 // ========= CONFIG =========
-const API_KEY = 'AIzaSyAKYbYpuXUxG7VlW8AdRga9tPNU7oLJKLY';
+const API_KEY = '***************************************';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
-const DEFAULT_PASSWORD = 'bws2026';
-const POLL_MS = 8000;
+const DEFAULT_PASSWORD = '*******';
+const POLL_MS = 5000; // ปรับความถี่เช็ค Realtime ให้เร็วขึ้น (ทุก 5 วินาที)
 let FOLDER_ID = null;
 let currentFiles = [];
 let selectMode = false;
@@ -497,10 +518,10 @@ const BG_PRESETS = [
 const STRINGS = {
   th: { eventSub:'ยินดีกับ', view:'VIEW', qr:'QR Code', download:'ดาวน์โหลด', select:'เลือกรูป', doneSelect:'เสร็จสิ้น', lang:'Language', langBtn:'ไทย', login:'เข้าสู่ระบบ',
         qrTitle:'สแกนเพื่อเปิดแกลเลอรีนี้', qrHint:'แชร์ลิงก์นี้ให้แขกเปิดดูรูปเองได้', scanSave:'SCAN เก็บภาพนี้',
-        photosWord:'ภาพ', updated:'อัปเดตล่าสุด', pickSelectFirst:'เลือกรูปก่อน แล้วค่อยกดดาวน์โหลด' },
+        photosWord:'ภาพ', updated:'อัปเดตล่าสุด', pickSelectFirst:'เลือกรูปก่อน แล้วค่อยกดดาวน์โหลด', selectAll:'เลือกทั้งหมด', deselectAll:'ยกเลิกทั้งหมด' },
   en: { eventSub:'Celebrating', view:'VIEW', qr:'QR Code', download:'Download', select:'Select', doneSelect:'Done', lang:'Language', langBtn:'EN', login:'Log in',
         qrTitle:'Scan to open this gallery', qrHint:'Share this link so guests can browse on their own phone', scanSave:'SCAN to save',
-        photosWord:'photos', updated:'Last updated', pickSelectFirst:'Select photos first, then tap download' },
+        photosWord:'photos', updated:'Last updated', pickSelectFirst:'Select photos first, then tap download', selectAll:'Select All', deselectAll:'Deselect All' },
 };
 
 // ---- DOM refs ----
@@ -525,6 +546,10 @@ const lblDownload = document.getElementById('lblDownload');
 const lblSelect = document.getElementById('lblSelect');
 const lblLang = document.getElementById('lblLang');
 const loginBtnLabel = document.getElementById('loginBtnLabel');
+const selectAllBar = document.getElementById('selectAllBar');
+const selectAllBtn = document.getElementById('selectAllBtn');
+const selectAllCountText = document.getElementById('selectAllCountText');
+const realtimeStatusText = document.getElementById('realtimeStatusText');
 
 function thumbUrl(fileId, size){ return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size || 400}`; }
 function showBanner(kind, text){ statusBanner.className = 'status-banner show ' + kind; statusBanner.textContent = text; }
@@ -536,6 +561,7 @@ async function fetchDriveFiles(){
   let pageToken = '';
   do {
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    // เรียงภาพล่าสุดอยู่บนสุดโดยใช้ createdTime desc
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=1000&fields=nextPageToken,files(id,name,createdTime)&key=${API_KEY}${tokenParam}`;
     const res = await fetch(url);
     if(!res.ok){
@@ -561,6 +587,11 @@ function renderMeta(files){
   const dateText = eventDateValue || '—';
   const t = STRINGS[lang];
   eventMeta.textContent = `${dateText} · ${files.length} ${t.photosWord} · ${t.updated} ${formatUpdated(files)}`;
+}
+
+function updateSelectBar(){
+  selectAllCountText.textContent = (lang === 'th' ? 'เลือกแล้ว ' : 'Selected ') + selectedIds.size + (lang === 'th' ? ' รูป' : ' photos');
+  selectAllBtn.textContent = selectedIds.size === currentFiles.length ? (lang === 'th' ? 'ยกเลิกทั้งหมด' : 'Deselect All') : (lang === 'th' ? 'เลือกทั้งหมด' : 'Select All');
 }
 
 function renderGrid(files){
@@ -589,15 +620,38 @@ function renderGrid(files){
     check.className = 'check';
     check.textContent = '✓';
     cell.appendChild(check);
-    cell.addEventListener('click', () => { selectMode ? toggleSelect(f.id, cell) : openLightbox(i); });
+    cell.addEventListener('click', () => { 
+      if(selectMode){ 
+        toggleSelect(f.id, cell); 
+      } else { 
+        openLightbox(i); 
+      } 
+    });
     grid.appendChild(cell);
   });
+  updateSelectBar();
 }
 
 function toggleSelect(id, cell){
   if(selectedIds.has(id)){ selectedIds.delete(id); cell.classList.remove('selected'); }
   else { selectedIds.add(id); cell.classList.add('selected'); }
+  updateSelectBar();
 }
+
+// ปุ่มเลือกทั้งหมด / ยกเลิกทั้งหมด
+selectAllBtn.addEventListener('click', () => {
+  if(selectedIds.size === currentFiles.length){
+    selectedIds.clear();
+  } else {
+    currentFiles.forEach(f => selectedIds.add(f.id));
+  }
+  document.querySelectorAll('.grid .cell').forEach(c => {
+    const id = c.dataset.id;
+    if(selectedIds.has(id)) c.classList.add('selected');
+    else c.classList.remove('selected');
+  });
+  updateSelectBar();
+});
 
 function renderHero(){
   const heroImg = document.getElementById('heroImg');
@@ -633,7 +687,7 @@ function renderAdminPreview(files){
   });
 }
 
-async function refresh(){
+async function refresh(isBackground = false){
   if(!FOLDER_ID){
     currentFiles = [];
     renderMeta([]);
@@ -644,22 +698,40 @@ async function refresh(){
     grid.appendChild(note);
     renderAdminPreview([]);
     showBanner('loading', lang==='th' ? 'ยังไม่ได้ตั้งค่าอัลบั้ม Google Drive' : 'No Google Drive album set yet');
+    realtimeStatusText.textContent = lang === 'th' ? 'ไม่ได้เชื่อมต่อโฟลเดอร์' : 'Disconnected';
     return;
+  }
+  if(!isBackground){
+    realtimeStatusText.textContent = lang === 'th' ? 'กำลังซิงค์ข้อมูล...' : 'Syncing...';
   }
   try{
     const files = await fetchDriveFiles();
+    
+    // ตรวจสอบว่ามีภาพใหม่เพิ่มเข้ามาแบบ Real-time หรือไม่
+    if(currentFiles.length > 0 && files.length > currentFiles.length){
+      const diffCount = files.length - currentFiles.length;
+      showBanner('loading', (lang === 'th' ? `✨ มีภาพใหม่ถูกเพิ่มเข้ามา ${diffCount} ภาพ!` : `✨ ${diffCount} new photo(s) added!`));
+      setTimeout(hideBanner, 4000);
+    }
+
     currentFiles = files;
     renderMeta(files);
     renderGrid(files);
     renderAdminPreview(files);
-    hideBanner();
+    if(!isBackground) hideBanner();
+    
+    const timeString = new Date().toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    realtimeStatusText.textContent = (lang === 'th' ? 'เรียลไทม์ (อัปเดตล่าสุด ' : 'Real-time (Updated ') + timeString + ')';
   }catch(err){
-    if(err.status === 403){
-      showBanner('error', lang==='th' ? 'เชื่อมต่อไม่ได้ (403) — ตรวจสอบการแชร์โฟลเดอร์และสิทธิ์ API Key' : 'Connection failed (403) — check folder sharing and API key permissions');
-    } else if(err.status === 400){
-      showBanner('error', lang==='th' ? 'คำขอไม่ถูกต้อง (400) — ตรวจสอบ Folder ID' : 'Bad request (400) — check the Folder ID');
-    } else {
-      showBanner('error', (lang==='th' ? 'ดึงข้อมูลไม่สำเร็จ: ' : 'Fetch failed: ') + err.message);
+    realtimeStatusText.textContent = lang === 'th' ? 'สถานะ: ขัดข้องชั่วคราว' : 'Status: Connection error';
+    if(!isBackground){
+      if(err.status === 403){
+        showBanner('error', lang==='th' ? 'เชื่อมต่อไม่ได้ (403) — ตรวจสอบการแชร์โฟลเดอร์และสิทธิ์ API Key' : 'Connection failed (403) — check folder sharing and API key permissions');
+      } else if(err.status === 400){
+        showBanner('error', lang==='th' ? 'คำขอไม่ถูกต้อง (400) — ตรวจสอบ Folder ID' : 'Bad request (400) — check the Folder ID');
+      } else {
+        showBanner('error', (lang==='th' ? 'ดึงข้อมูลไม่สำเร็จ: ' : 'Fetch failed: ') + err.message);
+      }
     }
   }
 }
@@ -682,9 +754,7 @@ function showLightboxAt(index){
   lightboxIndex = index;
   const f = currentFiles[index];
 
-  // Show the grid-size thumbnail immediately (already cached from the
-  // grid, so this paints instantly), then swap to the full-res version
-  // once it's loaded in the background — no visible blank/loading gap.
+  // โหลดภาพทันทีและพรีโหลดรอบข้างให้เร็วขึ้นทันที
   lightboxImg.src = thumbUrl(f.id, 400);
   const hiRes = new Image();
   hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
@@ -696,9 +766,8 @@ function showLightboxAt(index){
   if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
   lightbox.classList.add('open');
 
-  // Preload the neighboring photos (both sizes) so the next/prev tap
-  // shows an already-cached image instead of waiting on a fresh request.
-  [index - 1, index + 1].forEach(ni => {
+  // Preload ภาพก่อนหน้าและถัดไปล่วงหน้า เพื่อให้กดเลื่อนไปภาพต่อไปได้เร็วทันที
+  [index - 1, index + 1, index - 2, index + 2].forEach(ni => {
     if(ni < 0 || ni >= currentFiles.length) return;
     const nf = currentFiles[ni];
     new Image().src = thumbUrl(nf.id, 400);
@@ -738,7 +807,9 @@ btnSelect.addEventListener('click', () => {
   grid.classList.toggle('select-mode', selectMode);
   btnSelect.classList.toggle('active-toggle', selectMode);
   lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
+  selectAllBar.classList.toggle('show', selectMode);
   if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
+  else { updateSelectBar(); }
 });
 const downloadModal = document.getElementById('downloadModal');
 document.getElementById('downloadModalClose').addEventListener('click', () => downloadModal.classList.remove('open'));
@@ -770,7 +841,6 @@ async function startDownloads(ids){
   document.getElementById('manualDownloadLink').style.display = 'none';
   downloadModal.classList.add('open');
 
-  // Fetch every photo's actual bytes as File objects.
   let doneCount = 0;
   let failCount = 0;
   const fetchedFiles = await Promise.all(files.map(async (f, i) => {
@@ -798,11 +868,6 @@ async function startDownloads(ids){
     return;
   }
 
-  // On mobile, the native share sheet lets guests tap "Save Images"/
-  // "บันทึกรูปภาพ" to drop the photos straight into their Photos/Gallery
-  // app — no ZIP, no extracting. Desktop browsers (and any mobile browser
-  // where the share attempt fails for a reason other than the guest
-  // explicitly cancelling) fall back to a single ZIP download instead.
   const canUseShare = !!(navigator.canShare && navigator.canShare({ files: validFiles }));
   let shareSucceeded = false;
 
@@ -817,8 +882,6 @@ async function startDownloads(ids){
         progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
         return;
       }
-      // Any other failure (e.g. the share sheet couldn't open) — fall
-      // through to the ZIP path below instead of leaving the guest stuck.
       progressEl.textContent = 'เปิดหน้าต่างบันทึกไม่สำเร็จ กำลังเตรียมไฟล์ ZIP แทน...';
     }
   }
@@ -839,8 +902,6 @@ async function startDownloads(ids){
   a.click();
   a.remove();
 
-  // Always leave a visible manual link too — some mobile browsers don't
-  // reliably auto-trigger a blob download, so this is the guaranteed fallback.
   const manualLink = document.getElementById('manualDownloadLink');
   manualLink.href = zipUrl;
   manualLink.download = zipName;
@@ -968,12 +1029,12 @@ fontSelect.addEventListener('change', () => {
   document.documentElement.style.setProperty('--couple-font', fontSelect.value);
 });
 
-// ---- logo upload ----
+// ---- logo upload (ขยายเป็น 5MB) ----
 document.getElementById('logoFileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if(!file) return;
-  if(file.size > 1024*1024){
-    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 1MB' : 'File too large, please use an image under 1MB');
+  if(file.size > 5 * 1024 * 1024){
+    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 5MB' : 'File too large, please use an image under 5MB');
     return;
   }
   const reader = new FileReader();
@@ -1195,9 +1256,10 @@ document.getElementById('logoutBtn').addEventListener('click', showGuest);
 showBanner('loading', lang==='th' ? 'กำลังเชื่อมต่อ Google Drive...' : 'Connecting to Google Drive...');
 (async () => {
   await loadAllSettings();
-  await refresh();
+  await refresh(false);
 })();
-setInterval(refresh, POLL_MS);
+// ทำการดึงข้อมูลเช็คภาพใหม่แบบ Background Real-time ทุกๆ POLL_MS (5 วินาที)
+setInterval(() => refresh(true), POLL_MS);
 </script>
 
 </body>
