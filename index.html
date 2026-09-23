@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bangkok Wedding Studio — Gallery</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://drive.google.com">
+<link rel="preconnect" href="https://www.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Playfair+Display:ital,wght@0,600;1,600&family=Prompt:wght@400;600&family=Mali:wght@500;700&family=Noto+Serif+Thai:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -95,7 +97,31 @@
   }
   .event-meta{ font-size:11px; color:var(--ink-soft); }
 
+  /* ---- live status pill ---- */
+  .live-status{ display:flex; align-items:center; gap:6px; justify-content:center; font-size:10.5px; color:var(--ink-soft); margin-top:8px; }
+  .live-dot{ width:7px; height:7px; border-radius:50%; background:#4CAF50; flex-shrink:0; animation:livePulse 1.6s infinite; }
+  .live-dot.offline{ background:var(--err); animation:none; }
+  @keyframes livePulse{
+    0%{ box-shadow:0 0 0 0 rgba(76,175,80,0.55); }
+    70%{ box-shadow:0 0 0 6px rgba(76,175,80,0); }
+    100%{ box-shadow:0 0 0 0 rgba(76,175,80,0); }
+  }
+
+  /* ---- toast ---- */
+  .toast-banner{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%) translateY(-24px);
+    background:var(--ink); color:var(--card); font-family:'Noto Serif Thai', serif; font-size:12px; font-weight:600;
+    padding:10px 18px; border-radius:999px; box-shadow:0 10px 30px rgba(0,0,0,0.28); z-index:300;
+    opacity:0; pointer-events:none; transition:opacity 0.3s ease, transform 0.3s ease; white-space:nowrap;
+  }
+  .toast-banner.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
   .view-row{ display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-bottom:12px;}
+  .select-all-btn{
+    font-family:'Noto Serif Thai', serif; font-size:11px; font-weight:600;
+    background:var(--accent-soft); border:1px solid var(--line); color:var(--accent);
+    padding:6px 12px; border-radius:999px; cursor:pointer; white-space:nowrap; margin-right:auto;
+  }
   .view-label{ font-size:11px; font-weight:700; letter-spacing:0.08em; color:var(--ink-soft);}
   .view-toggle{
     width:34px; height:34px; border-radius:50%; background:var(--accent-soft); border:none;
@@ -111,11 +137,26 @@
   .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; }
   .grid.dense{ grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); }
   .cell{ position:relative; width:100%; padding-bottom:133.33%; border-radius:14px; overflow:hidden; background:var(--accent-soft); cursor:pointer; }
-  .cell img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; transition:transform 0.2s;}
+  .cell img{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+    opacity:0; transition:opacity 0.25s ease, transform 0.2s;
+  }
+  .cell img.loaded{ opacity:1; }
   .cell:hover img{ transform:scale(1.05); }
   .cell .badge{
     position:absolute; bottom:7px; left:7px; background:var(--chip-bg); color:#fff;
     font-family:'Inter', sans-serif; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:7px;
+  }
+  .cell .new-tag{
+    position:absolute; top:7px; left:7px; background:#4CAF50; color:#fff;
+    font-family:'Inter', sans-serif; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:6px;
+    letter-spacing:0.03em; z-index:2;
+  }
+  .cell.new-cell{ animation:newPop 0.6s ease; }
+  @keyframes newPop{
+    0%{ transform:scale(0.85); opacity:0.3; box-shadow:0 0 0 3px var(--accent); }
+    60%{ transform:scale(1.02); }
+    100%{ transform:scale(1); box-shadow:0 0 0 0 transparent; }
   }
   .cell .check{
     position:absolute; top:7px; right:7px; width:22px; height:22px; border-radius:50%;
@@ -223,6 +264,7 @@
     background:var(--bg); border:1px solid var(--line); color:var(--ink);
     padding:8px 14px; border-radius:8px; cursor:pointer;
   }
+  .logo-hint{ font-size:10px; color:var(--ink-soft); margin-top:6px; }
 
   .swatch-row{ display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
   .swatch{ width:32px; height:32px; border-radius:50%; cursor:pointer; border:2px solid transparent; position:relative; flex-shrink:0; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08);}
@@ -239,6 +281,9 @@
 </style>
 </head>
 <body>
+
+<!-- Toast -->
+<div class="toast-banner" id="toastBanner"></div>
 
 <!-- ================= GUEST GALLERY (default view) ================= -->
 <div class="page" id="guestPage">
@@ -264,9 +309,14 @@
       <div class="event-sub" id="eventSub">ยินดีกับ</div>
       <h1 class="event-title" id="eventTitle">คู่บ่าวสาว</h1>
       <div class="event-meta" id="eventMeta">— · — ภาพ · อัปเดตล่าสุด —</div>
+      <div class="live-status" id="liveStatus">
+        <span class="live-dot" id="liveDot"></span>
+        <span id="liveStatusText">กำลังเชื่อมต่อ...</span>
+      </div>
     </div>
 
     <div class="view-row">
+      <button class="select-all-btn" id="selectAllBtn" style="display:none;">เลือกทั้งหมด</button>
       <span class="view-label" id="viewLabel">VIEW</span>
       <button class="view-toggle" id="viewToggle" title="สลับความหนาแน่นของกริด">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
@@ -364,7 +414,8 @@
         <input type="file" id="logoFileInput" accept="image/*" style="display:none;">
       </label>
     </div>
-    <div class="admin-field">
+    <div class="logo-hint">รองรับไฟล์สูงสุด 8MB ระบบจะย่อขนาดให้อัตโนมัติ</div>
+    <div class="admin-field" style="margin-top:12px;">
       <label>ชื่อสตูดิโอ / แบรนด์</label>
       <input type="text" id="inputBrand" placeholder="Bangkok Wedding Studio">
     </div>
@@ -468,15 +519,19 @@
 
 <script>
 // ========= CONFIG =========
-const API_KEY = 'AIzaSyAKYbYpuXUxG7VlW8AdRga9tPNU7oLJKLY';
+const API_KEY = '***************************************';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
-const DEFAULT_PASSWORD = 'bws2026';
-const POLL_MS = 8000;
+const DEFAULT_PASSWORD = '*******';
+const POLL_MS = 5000;
 let FOLDER_ID = null;
 let currentFiles = [];
 let selectMode = false;
 const selectedIds = new Set();
 let lang = 'th';
+let knownFileIds = new Set();
+let isFirstLoad = true;
+let lastLiveOnline = null;
+let toastTimer = null;
 
 const THEME_PRESETS = [
   { name:'ทองแชมเปญ (ดีฟอลต์)', color:'#A9814B' },
@@ -497,10 +552,14 @@ const BG_PRESETS = [
 const STRINGS = {
   th: { eventSub:'ยินดีกับ', view:'VIEW', qr:'QR Code', download:'ดาวน์โหลด', select:'เลือกรูป', doneSelect:'เสร็จสิ้น', lang:'Language', langBtn:'ไทย', login:'เข้าสู่ระบบ',
         qrTitle:'สแกนเพื่อเปิดแกลเลอรีนี้', qrHint:'แชร์ลิงก์นี้ให้แขกเปิดดูรูปเองได้', scanSave:'SCAN เก็บภาพนี้',
-        photosWord:'ภาพ', updated:'อัปเดตล่าสุด', pickSelectFirst:'เลือกรูปก่อน แล้วค่อยกดดาวน์โหลด' },
+        photosWord:'ภาพ', updated:'อัปเดตล่าสุด', pickSelectFirst:'เลือกรูปก่อน แล้วค่อยกดดาวน์โหลด',
+        selectAll:'เลือกทั้งหมด', deselectAll:'ยกเลิกทั้งหมด', newBadge:'ใหม่',
+        liveOn:'เรียลไทม์ • อัปเดตล่าสุด ', liveOff:'ขาดการเชื่อมต่อ กำลังลองใหม่...', liveNoAlbum:'ยังไม่ได้ตั้งค่าอัลบั้ม' },
   en: { eventSub:'Celebrating', view:'VIEW', qr:'QR Code', download:'Download', select:'Select', doneSelect:'Done', lang:'Language', langBtn:'EN', login:'Log in',
         qrTitle:'Scan to open this gallery', qrHint:'Share this link so guests can browse on their own phone', scanSave:'SCAN to save',
-        photosWord:'photos', updated:'Last updated', pickSelectFirst:'Select photos first, then tap download' },
+        photosWord:'photos', updated:'Last updated', pickSelectFirst:'Select photos first, then tap download',
+        selectAll:'Select all', deselectAll:'Deselect all', newBadge:'NEW',
+        liveOn:'Live • Last update ', liveOff:'Disconnected, retrying...', liveNoAlbum:'No album configured' },
 };
 
 // ---- DOM refs ----
@@ -525,18 +584,49 @@ const lblDownload = document.getElementById('lblDownload');
 const lblSelect = document.getElementById('lblSelect');
 const lblLang = document.getElementById('lblLang');
 const loginBtnLabel = document.getElementById('loginBtnLabel');
+const selectAllBtn = document.getElementById('selectAllBtn');
 
 function thumbUrl(fileId, size){ return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size || 400}`; }
 function showBanner(kind, text){ statusBanner.className = 'status-banner show ' + kind; statusBanner.textContent = text; }
 function hideBanner(){ statusBanner.className = 'status-banner'; }
 
+function showToast(msg){
+  const t = document.getElementById('toastBanner');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function updateLiveStatus(online, notConfigured){
+  const dot = document.getElementById('liveDot');
+  const text = document.getElementById('liveStatusText');
+  if(!dot || !text) return;
+  const t = STRINGS[lang];
+  if(notConfigured){
+    dot.classList.add('offline');
+    text.textContent = t.liveNoAlbum;
+    return;
+  }
+  lastLiveOnline = online;
+  const now = new Date().toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  if(online){
+    dot.classList.remove('offline');
+    text.textContent = t.liveOn + now;
+  } else {
+    dot.classList.add('offline');
+    text.textContent = t.liveOff;
+  }
+}
+
 async function fetchDriveFiles(){
   const q = encodeURIComponent(`'${FOLDER_ID}' in parents and mimeType contains 'image/' and trashed = false`);
+  const orderBy = encodeURIComponent('createdTime desc');
   let allFiles = [];
   let pageToken = '';
   do {
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=1000&fields=nextPageToken,files(id,name,createdTime)&key=${API_KEY}${tokenParam}`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=${orderBy}&pageSize=1000&fields=nextPageToken,files(id,name,createdTime)&key=${API_KEY}${tokenParam}`;
     const res = await fetch(url);
     if(!res.ok){
       const body = await res.json().catch(() => ({}));
@@ -563,7 +653,14 @@ function renderMeta(files){
   eventMeta.textContent = `${dateText} · ${files.length} ${t.photosWord} · ${t.updated} ${formatUpdated(files)}`;
 }
 
-function renderGrid(files){
+function updateSelectAllLabel(){
+  if(!selectAllBtn) return;
+  const t = STRINGS[lang];
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  selectAllBtn.textContent = allSelected ? t.deselectAll : t.selectAll;
+}
+
+function renderGrid(files, newIds){
   grid.innerHTML = '';
   if(files.length === 0){
     const note = document.createElement('div');
@@ -572,19 +669,34 @@ function renderGrid(files){
     grid.appendChild(note);
     return;
   }
+  const newSet = new Set(newIds || []);
+  const t = STRINGS[lang];
   files.forEach((f, i) => {
     const cell = document.createElement('div');
-    cell.className = 'cell' + (selectedIds.has(f.id) ? ' selected' : '');
+    cell.className = 'cell' + (selectedIds.has(f.id) ? ' selected' : '') + (newSet.has(f.id) ? ' new-cell' : '');
     cell.dataset.id = f.id;
     const img = document.createElement('img');
+    img.decoding = 'async';
+    if(i < 10){
+      img.loading = 'eager';
+      img.setAttribute('fetchpriority', 'high');
+    } else {
+      img.loading = 'lazy';
+    }
+    img.addEventListener('load', () => img.classList.add('loaded'));
     img.src = thumbUrl(f.id, 400);
-    img.loading = 'lazy';
     img.alt = f.name || '';
     cell.appendChild(img);
     const badge = document.createElement('div');
     badge.className = 'badge';
     badge.textContent = String(i + 1).padStart(2, '0');
     cell.appendChild(badge);
+    if(newSet.has(f.id)){
+      const newTag = document.createElement('div');
+      newTag.className = 'new-tag';
+      newTag.textContent = t.newBadge;
+      cell.appendChild(newTag);
+    }
     const check = document.createElement('div');
     check.className = 'check';
     check.textContent = '✓';
@@ -592,12 +704,24 @@ function renderGrid(files){
     cell.addEventListener('click', () => { selectMode ? toggleSelect(f.id, cell) : openLightbox(i); });
     grid.appendChild(cell);
   });
+  updateSelectAllLabel();
 }
 
 function toggleSelect(id, cell){
   if(selectedIds.has(id)){ selectedIds.delete(id); cell.classList.remove('selected'); }
   else { selectedIds.add(id); cell.classList.add('selected'); }
+  updateSelectAllLabel();
 }
+
+selectAllBtn.addEventListener('click', () => {
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  if(allSelected){
+    selectedIds.clear();
+  } else {
+    currentFiles.forEach(f => selectedIds.add(f.id));
+  }
+  renderGrid(currentFiles);
+});
 
 function renderHero(){
   const heroImg = document.getElementById('heroImg');
@@ -622,6 +746,7 @@ function renderAdminPreview(files){
     const img = document.createElement('img');
     img.src = thumbUrl(f.id, 200);
     img.loading = 'lazy';
+    img.decoding = 'async';
     cell.appendChild(img);
     cell.addEventListener('click', () => {
       heroFileId = f.id;
@@ -644,27 +769,35 @@ async function refresh(){
     grid.appendChild(note);
     renderAdminPreview([]);
     showBanner('loading', lang==='th' ? 'ยังไม่ได้ตั้งค่าอัลบั้ม Google Drive' : 'No Google Drive album set yet');
+    updateLiveStatus(false, true);
     return;
   }
   try{
     const files = await fetchDriveFiles();
+    const newOnes = isFirstLoad ? [] : files.filter(f => !knownFileIds.has(f.id));
+    knownFileIds = new Set(files.map(f => f.id));
     currentFiles = files;
     renderMeta(files);
-    renderGrid(files);
+    renderGrid(files, newOnes.map(f => f.id));
     renderAdminPreview(files);
     hideBanner();
+    updateLiveStatus(true);
+    if(!isFirstLoad && newOnes.length > 0){
+      showToast(lang==='th' ? `📸 มีรูปใหม่เข้ามา ${newOnes.length} รูป` : `📸 ${newOnes.length} new photo(s) added`);
+    }
+    isFirstLoad = false;
   }catch(err){
+    updateLiveStatus(false);
     if(err.status === 403){
       showBanner('error', lang==='th' ? 'เชื่อมต่อไม่ได้ (403) — ตรวจสอบการแชร์โฟลเดอร์และสิทธิ์ API Key' : 'Connection failed (403) — check folder sharing and API key permissions');
     } else if(err.status === 400){
-      showBanner('error', lang==='th' ? 'คำขอไม่ถูกต้อง (400) — ตรวจสอบ Folder ID' : 'Bad request (400) — check the Folder ID');
+      showBanner('error', (lang==='th' ? 'คำขอไม่ถูกต้อง (400): ' : 'Bad request (400): ') + err.message);
     } else {
       showBanner('error', (lang==='th' ? 'ดึงข้อมูลไม่สำเร็จ: ' : 'Fetch failed: ') + err.message);
     }
   }
 }
 
-// ---- lightbox ----
 const lightbox = document.getElementById('lightbox');
 const lightboxImg = document.getElementById('lightboxImg');
 const lightboxQr = document.getElementById('lightboxQr');
@@ -682,9 +815,6 @@ function showLightboxAt(index){
   lightboxIndex = index;
   const f = currentFiles[index];
 
-  // Show the grid-size thumbnail immediately (already cached from the
-  // grid, so this paints instantly), then swap to the full-res version
-  // once it's loaded in the background — no visible blank/loading gap.
   lightboxImg.src = thumbUrl(f.id, 400);
   const hiRes = new Image();
   hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
@@ -696,8 +826,6 @@ function showLightboxAt(index){
   if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
   lightbox.classList.add('open');
 
-  // Preload the neighboring photos (both sizes) so the next/prev tap
-  // shows an already-cached image instead of waiting on a fresh request.
   [index - 1, index + 1].forEach(ni => {
     if(ni < 0 || ni >= currentFiles.length) return;
     const nf = currentFiles[ni];
@@ -710,7 +838,6 @@ function closeLightbox(){ lightbox.classList.remove('open'); lightboxImg.src='';
 lightboxPrev.addEventListener('click', (e) => { e.stopPropagation(); showLightboxAt(lightboxIndex - 1); });
 lightboxNext.addEventListener('click', (e) => { e.stopPropagation(); showLightboxAt(lightboxIndex + 1); });
 
-// ---- QR modal ----
 const qrModal = document.getElementById('qrModal');
 const qrModalHolder = document.getElementById('qrModalHolder');
 document.getElementById('qrModalClose').addEventListener('click', closeQrModal);
@@ -732,13 +859,14 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---- select + download ----
 btnSelect.addEventListener('click', () => {
   selectMode = !selectMode;
   grid.classList.toggle('select-mode', selectMode);
   btnSelect.classList.toggle('active-toggle', selectMode);
   lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
+  selectAllBtn.style.display = selectMode ? 'inline-block' : 'none';
   if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
+  else { updateSelectAllLabel(); }
 });
 const downloadModal = document.getElementById('downloadModal');
 document.getElementById('downloadModalClose').addEventListener('click', () => downloadModal.classList.remove('open'));
@@ -770,7 +898,6 @@ async function startDownloads(ids){
   document.getElementById('manualDownloadLink').style.display = 'none';
   downloadModal.classList.add('open');
 
-  // Fetch every photo's actual bytes as File objects.
   let doneCount = 0;
   let failCount = 0;
   const fetchedFiles = await Promise.all(files.map(async (f, i) => {
@@ -798,11 +925,6 @@ async function startDownloads(ids){
     return;
   }
 
-  // On mobile, the native share sheet lets guests tap "Save Images"/
-  // "บันทึกรูปภาพ" to drop the photos straight into their Photos/Gallery
-  // app — no ZIP, no extracting. Desktop browsers (and any mobile browser
-  // where the share attempt fails for a reason other than the guest
-  // explicitly cancelling) fall back to a single ZIP download instead.
   const canUseShare = !!(navigator.canShare && navigator.canShare({ files: validFiles }));
   let shareSucceeded = false;
 
@@ -817,8 +939,6 @@ async function startDownloads(ids){
         progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
         return;
       }
-      // Any other failure (e.g. the share sheet couldn't open) — fall
-      // through to the ZIP path below instead of leaving the guest stuck.
       progressEl.textContent = 'เปิดหน้าต่างบันทึกไม่สำเร็จ กำลังเตรียมไฟล์ ZIP แทน...';
     }
   }
@@ -839,8 +959,6 @@ async function startDownloads(ids){
   a.click();
   a.remove();
 
-  // Always leave a visible manual link too — some mobile browsers don't
-  // reliably auto-trigger a blob download, so this is the guaranteed fallback.
   const manualLink = document.getElementById('manualDownloadLink');
   manualLink.href = zipUrl;
   manualLink.download = zipName;
@@ -860,18 +978,15 @@ btnDownload.addEventListener('click', () => {
   startDownloads(Array.from(selectedIds));
 });
 
-// ---- view density ----
 let dense = false;
 viewToggle.addEventListener('click', () => { dense = !dense; grid.classList.toggle('dense', dense); });
 
-// ---- light / dark ----
 themeToggle.addEventListener('click', () => {
   document.body.classList.toggle('dark');
   themeKnob.textContent = document.body.classList.contains('dark') ? '🌙' : '☀️';
   saveSetting(THEME_MODE_KEY, document.body.classList.contains('dark') ? 'dark' : 'light', false);
 });
 
-// ---- language ----
 function applyLangStrings(){
   const t = STRINGS[lang];
   eventSub.textContent = eventSubValue || t.eventSub;
@@ -886,6 +1001,8 @@ function applyLangStrings(){
   document.getElementById('qrModalHint').textContent = t.qrHint;
   renderMeta(currentFiles);
   renderGrid(currentFiles);
+  updateSelectAllLabel();
+  if(lastLiveOnline !== null) updateLiveStatus(lastLiveOnline);
 }
 function toggleLang(){
   lang = lang === 'th' ? 'en' : 'th';
@@ -895,14 +1012,6 @@ function toggleLang(){
 langPillTop.addEventListener('click', toggleLang);
 btnLang.addEventListener('click', toggleLang);
 
-// ---- accent color ----
-function darken(hex, amount){
-  const c = hex.replace('#','');
-  const num = parseInt(c, 16);
-  let r=(num>>16)-amount, g=((num>>8)&0x00FF)-amount, b=(num&0x0000FF)-amount;
-  r=Math.max(0,r); g=Math.max(0,g); b=Math.max(0,b);
-  return '#'+(r<<16|g<<8|b).toString(16).padStart(6,'0');
-}
 function hexToRgba(hex, alpha){
   const c = hex.replace('#','');
   const num = parseInt(c,16);
@@ -960,7 +1069,6 @@ document.getElementById('saveColorsBtn').addEventListener('click', async () => {
   status.textContent = 'บันทึกแล้ว ✓';
 });
 
-// ---- font picker ----
 const fontSelect = document.getElementById('fontSelect');
 const fontPreview = document.getElementById('fontPreview');
 fontSelect.addEventListener('change', () => {
@@ -968,20 +1076,34 @@ fontSelect.addEventListener('change', () => {
   document.documentElement.style.setProperty('--couple-font', fontSelect.value);
 });
 
-// ---- logo upload ----
 document.getElementById('logoFileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if(!file) return;
-  if(file.size > 1024*1024){
-    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 1MB' : 'File too large, please use an image under 1MB');
+  const MAX_RAW_SIZE = 8 * 1024 * 1024;
+  if(file.size > MAX_RAW_SIZE){
+    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 8MB' : 'File too large, please use an image under 8MB');
     return;
   }
   const reader = new FileReader();
-  reader.onload = async () => {
-    const dataUrl = reader.result;
-    document.getElementById('logoPreview').innerHTML = `<img src="${dataUrl}">`;
-    applyLogo(dataUrl);
-    await saveSetting(LOGO_KEY, dataUrl, true);
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = async () => {
+      const MAX_DIM = 640;
+      let { width, height } = img;
+      if(width > MAX_DIM || height > MAX_DIM){
+        if(width > height){ height = Math.round(height * (MAX_DIM / width)); width = MAX_DIM; }
+        else { width = Math.round(width * (MAX_DIM / height)); height = MAX_DIM; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      document.getElementById('logoPreview').innerHTML = `<img src="${dataUrl}">`;
+      applyLogo(dataUrl);
+      await saveSetting(LOGO_KEY, dataUrl, true);
+    };
+    img.src = reader.result;
   };
   reader.readAsDataURL(file);
 });
@@ -989,7 +1111,6 @@ function applyLogo(dataUrl){
   if(dataUrl){ logoCircle.innerHTML = `<img src="${dataUrl}">`; }
 }
 
-// ---- shared/local persisted settings ----
 const BRAND_KEY = 'bws-gallery2:brand-name';
 const EVENT_SUB_KEY = 'bws-gallery2:event-sub';
 const COUPLE_KEY = 'bws-gallery2:couple-names';
@@ -1012,7 +1133,7 @@ async function saveSetting(key, value){
   try{
     const url = `${FIREBASE_DB_URL}/${encodeURIComponent(key)}.json`;
     await fetch(url, { method:'PUT', body: JSON.stringify(value) });
-  }catch(err){ /* offline or Firebase unreachable — fails silently */ }
+  }catch(err){}
 }
 async function loadSetting(key){
   try{
@@ -1068,7 +1189,6 @@ async function loadAllSettings(){
   applyLangStrings();
 }
 
-// ---- admin field save handlers ----
 document.getElementById('saveBrandBtn').addEventListener('click', async () => {
   const brand = document.getElementById('inputBrand').value.trim();
   const status = document.getElementById('brandSaveStatus');
@@ -1132,6 +1252,8 @@ document.getElementById('folderSaveBtn').addEventListener('click', async () => {
   const parsed = parseFolderId(folderInput.value);
   if(!parsed){ status.style.color='var(--err)'; status.textContent='ลิงก์ไม่ถูกต้อง'; return; }
   status.style.color=''; status.textContent='กำลังบันทึก...';
+  isFirstLoad = true;
+  knownFileIds = new Set();
   await saveSetting(FOLDER_KEY, parsed, true);
   FOLDER_ID = parsed;
   await refresh();
@@ -1148,7 +1270,6 @@ document.getElementById('savePasswordBtn').addEventListener('click', async () =>
   status.textContent = 'เปลี่ยนรหัสผ่านแล้ว ✓';
 });
 
-// ---- login / admin view toggling ----
 const guestPage = document.getElementById('guestPage');
 const bottomToolbar = document.getElementById('bottomToolbar');
 const adminWrap = document.getElementById('adminWrap');
@@ -1191,7 +1312,6 @@ function showGuest(){
 document.getElementById('backToGalleryBtn').addEventListener('click', showGuest);
 document.getElementById('logoutBtn').addEventListener('click', showGuest);
 
-// ---- boot ----
 showBanner('loading', lang==='th' ? 'กำลังเชื่อมต่อ Google Drive...' : 'Connecting to Google Drive...');
 (async () => {
   await loadAllSettings();
