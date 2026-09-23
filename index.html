@@ -232,10 +232,35 @@
 
   .font-preview{ font-size:20px; margin-top:6px; color:var(--ink); }
 
-  .admin-photo-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; max-height:340px; overflow-y:auto; padding-right:2px; }
-  .admin-photo-cell{ aspect-ratio:1/1; border-radius:8px; overflow:hidden; background:var(--accent-soft); cursor:pointer; border:2px solid transparent;}
-  .admin-photo-cell.selected{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft);}
-  .admin-photo-cell img{ width:100%; height:100%; object-fit:cover; display:block;}
+  /* แก้ไขปัญหารูปซ้อนกันโดยกำหนดโครงสร้าง grid และ position ให้ถูกต้อง */
+  .admin-photo-grid{ 
+    display: grid; 
+    grid-template-columns: repeat(4, 1fr); 
+    gap: 10px; 
+    max-height: 340px; 
+    overflow-y: auto; 
+    padding: 4px;
+  }
+  .admin-photo-cell{ 
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1; 
+    border-radius: 8px; 
+    overflow: hidden; 
+    background: var(--accent-soft); 
+    cursor: pointer; 
+    border: 2px solid transparent;
+  }
+  .admin-photo-cell.selected{ 
+    border-color: var(--accent); 
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .admin-photo-cell img{ 
+    width: 100%; 
+    height: 100%; 
+    object-fit: cover; 
+    display: block;
+  }
 </style>
 </head>
 <body>
@@ -468,9 +493,9 @@
 
 <script>
 // ========= CONFIG =========
-const API_KEY = 'AIzaSyAKYbYpuXUxG7VlW8AdRga9tPNU7oLJKLY';
+const API_KEY = '***************************************';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
-const DEFAULT_PASSWORD = 'bws2026';
+const DEFAULT_PASSWORD = '*******';
 const POLL_MS = 8000;
 let FOLDER_ID = null;
 let currentFiles = [];
@@ -682,9 +707,6 @@ function showLightboxAt(index){
   lightboxIndex = index;
   const f = currentFiles[index];
 
-  // Show the grid-size thumbnail immediately (already cached from the
-  // grid, so this paints instantly), then swap to the full-res version
-  // once it's loaded in the background — no visible blank/loading gap.
   lightboxImg.src = thumbUrl(f.id, 400);
   const hiRes = new Image();
   hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
@@ -696,8 +718,6 @@ function showLightboxAt(index){
   if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
   lightbox.classList.add('open');
 
-  // Preload the neighboring photos (both sizes) so the next/prev tap
-  // shows an already-cached image instead of waiting on a fresh request.
   [index - 1, index + 1].forEach(ni => {
     if(ni < 0 || ni >= currentFiles.length) return;
     const nf = currentFiles[ni];
@@ -770,7 +790,6 @@ async function startDownloads(ids){
   document.getElementById('manualDownloadLink').style.display = 'none';
   downloadModal.classList.add('open');
 
-  // Fetch every photo's actual bytes as File objects.
   let doneCount = 0;
   let failCount = 0;
   const fetchedFiles = await Promise.all(files.map(async (f, i) => {
@@ -798,11 +817,6 @@ async function startDownloads(ids){
     return;
   }
 
-  // On mobile, the native share sheet lets guests tap "Save Images"/
-  // "บันทึกรูปภาพ" to drop the photos straight into their Photos/Gallery
-  // app — no ZIP, no extracting. Desktop browsers (and any mobile browser
-  // where the share attempt fails for a reason other than the guest
-  // explicitly cancelling) fall back to a single ZIP download instead.
   const canUseShare = !!(navigator.canShare && navigator.canShare({ files: validFiles }));
   let shareSucceeded = false;
 
@@ -817,8 +831,6 @@ async function startDownloads(ids){
         progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
         return;
       }
-      // Any other failure (e.g. the share sheet couldn't open) — fall
-      // through to the ZIP path below instead of leaving the guest stuck.
       progressEl.textContent = 'เปิดหน้าต่างบันทึกไม่สำเร็จ กำลังเตรียมไฟล์ ZIP แทน...';
     }
   }
@@ -839,8 +851,6 @@ async function startDownloads(ids){
   a.click();
   a.remove();
 
-  // Always leave a visible manual link too — some mobile browsers don't
-  // reliably auto-trigger a blob download, so this is the guaranteed fallback.
   const manualLink = document.getElementById('manualDownloadLink');
   manualLink.href = zipUrl;
   manualLink.download = zipName;
@@ -860,18 +870,15 @@ btnDownload.addEventListener('click', () => {
   startDownloads(Array.from(selectedIds));
 });
 
-// ---- view density ----
 let dense = false;
 viewToggle.addEventListener('click', () => { dense = !dense; grid.classList.toggle('dense', dense); });
 
-// ---- light / dark ----
 themeToggle.addEventListener('click', () => {
   document.body.classList.toggle('dark');
   themeKnob.textContent = document.body.classList.contains('dark') ? '🌙' : '☀️';
   saveSetting(THEME_MODE_KEY, document.body.classList.contains('dark') ? 'dark' : 'light', false);
 });
 
-// ---- language ----
 function applyLangStrings(){
   const t = STRINGS[lang];
   eventSub.textContent = eventSubValue || t.eventSub;
@@ -895,7 +902,6 @@ function toggleLang(){
 langPillTop.addEventListener('click', toggleLang);
 btnLang.addEventListener('click', toggleLang);
 
-// ---- accent color ----
 function darken(hex, amount){
   const c = hex.replace('#','');
   const num = parseInt(c, 16);
@@ -960,7 +966,6 @@ document.getElementById('saveColorsBtn').addEventListener('click', async () => {
   status.textContent = 'บันทึกแล้ว ✓';
 });
 
-// ---- font picker ----
 const fontSelect = document.getElementById('fontSelect');
 const fontPreview = document.getElementById('fontPreview');
 fontSelect.addEventListener('change', () => {
@@ -968,7 +973,6 @@ fontSelect.addEventListener('change', () => {
   document.documentElement.style.setProperty('--couple-font', fontSelect.value);
 });
 
-// ---- logo upload ----
 document.getElementById('logoFileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if(!file) return;
@@ -989,7 +993,6 @@ function applyLogo(dataUrl){
   if(dataUrl){ logoCircle.innerHTML = `<img src="${dataUrl}">`; }
 }
 
-// ---- shared/local persisted settings ----
 const BRAND_KEY = 'bws-gallery2:brand-name';
 const EVENT_SUB_KEY = 'bws-gallery2:event-sub';
 const COUPLE_KEY = 'bws-gallery2:couple-names';
@@ -1012,7 +1015,7 @@ async function saveSetting(key, value){
   try{
     const url = `${FIREBASE_DB_URL}/${encodeURIComponent(key)}.json`;
     await fetch(url, { method:'PUT', body: JSON.stringify(value) });
-  }catch(err){ /* offline or Firebase unreachable — fails silently */ }
+  }catch(err){ }
 }
 async function loadSetting(key){
   try{
@@ -1068,7 +1071,6 @@ async function loadAllSettings(){
   applyLangStrings();
 }
 
-// ---- admin field save handlers ----
 document.getElementById('saveBrandBtn').addEventListener('click', async () => {
   const brand = document.getElementById('inputBrand').value.trim();
   const status = document.getElementById('brandSaveStatus');
@@ -1148,7 +1150,6 @@ document.getElementById('savePasswordBtn').addEventListener('click', async () =>
   status.textContent = 'เปลี่ยนรหัสผ่านแล้ว ✓';
 });
 
-// ---- login / admin view toggling ----
 const guestPage = document.getElementById('guestPage');
 const bottomToolbar = document.getElementById('bottomToolbar');
 const adminWrap = document.getElementById('adminWrap');
@@ -1191,7 +1192,6 @@ function showGuest(){
 document.getElementById('backToGalleryBtn').addEventListener('click', showGuest);
 document.getElementById('logoutBtn').addEventListener('click', showGuest);
 
-// ---- boot ----
 showBanner('loading', lang==='th' ? 'กำลังเชื่อมต่อ Google Drive...' : 'Connecting to Google Drive...');
 (async () => {
   await loadAllSettings();
