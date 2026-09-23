@@ -492,7 +492,7 @@
 const API_KEY = '***************************************';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
 const DEFAULT_PASSWORD = '*******';
-const POLL_MS = 5000; // ปรับความถี่เช็ค Realtime ให้เร็วขึ้น (ทุก 5 วินาที)
+const POLL_MS = 5000;
 let FOLDER_ID = null;
 let currentFiles = [];
 let selectMode = false;
@@ -561,7 +561,6 @@ async function fetchDriveFiles(){
   let pageToken = '';
   do {
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-    // เรียงภาพล่าสุดอยู่บนสุดโดยใช้ createdTime desc
     const url = `https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=1000&fields=nextPageToken,files(id,name,createdTime)&key=${API_KEY}${tokenParam}`;
     const res = await fetch(url);
     if(!res.ok){
@@ -707,7 +706,6 @@ async function refresh(isBackground = false){
   try{
     const files = await fetchDriveFiles();
     
-    // ตรวจสอบว่ามีภาพใหม่เพิ่มเข้ามาแบบ Real-time หรือไม่
     if(currentFiles.length > 0 && files.length > currentFiles.length){
       const diffCount = files.length - currentFiles.length;
       showBanner('loading', (lang === 'th' ? `✨ มีภาพใหม่ถูกเพิ่มเข้ามา ${diffCount} ภาพ!` : `✨ ${diffCount} new photo(s) added!`));
@@ -754,7 +752,6 @@ function showLightboxAt(index){
   lightboxIndex = index;
   const f = currentFiles[index];
 
-  // โหลดภาพทันทีและพรีโหลดรอบข้างให้เร็วขึ้นทันที
   lightboxImg.src = thumbUrl(f.id, 400);
   const hiRes = new Image();
   hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
@@ -766,7 +763,6 @@ function showLightboxAt(index){
   if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
   lightbox.classList.add('open');
 
-  // Preload ภาพก่อนหน้าและถัดไปล่วงหน้า เพื่อให้กดเลื่อนไปภาพต่อไปได้เร็วทันที
   [index - 1, index + 1, index - 2, index + 2].forEach(ni => {
     if(ni < 0 || ni >= currentFiles.length) return;
     const nf = currentFiles[ni];
@@ -807,10 +803,18 @@ btnSelect.addEventListener('click', () => {
   grid.classList.toggle('select-mode', selectMode);
   btnSelect.classList.toggle('active-toggle', selectMode);
   lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
+  
+  // สั่งเปิด/ปิด แถบปุ่ม "เลือกทั้งหมด" ตรงนี้ครับ
   selectAllBar.classList.toggle('show', selectMode);
-  if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
-  else { updateSelectBar(); }
+  
+  if(!selectMode){ 
+    selectedIds.clear(); 
+    renderGrid(currentFiles); 
+  } else { 
+    updateSelectBar(); 
+  }
 });
+
 const downloadModal = document.getElementById('downloadModal');
 document.getElementById('downloadModalClose').addEventListener('click', () => downloadModal.classList.remove('open'));
 downloadModal.addEventListener('click', (e) => { if(e.target===downloadModal) downloadModal.classList.remove('open'); });
@@ -1258,7 +1262,6 @@ showBanner('loading', lang==='th' ? 'กำลังเชื่อมต่อ 
   await loadAllSettings();
   await refresh(false);
 })();
-// ทำการดึงข้อมูลเช็คภาพใหม่แบบ Background Real-time ทุกๆ POLL_MS (5 วินาที)
 setInterval(() => refresh(true), POLL_MS);
 </script>
 
