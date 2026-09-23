@@ -315,6 +315,7 @@
     <h3>กำลังดาวน์โหลดรูปภาพ</h3>
     <div id="downloadList" style="text-align:left; max-height:260px; overflow-y:auto; margin-bottom:10px;"></div>
     <div class="modal-hint" id="downloadProgressText">0 / 0 เสร็จแล้ว</div>
+    <a id="manualDownloadLink" href="#" download style="display:none; margin-top:10px; font-size:12px; font-weight:600; color:var(--accent); text-decoration:underline;">แตะที่นี่เพื่อดาวน์โหลด ถ้าไม่เริ่มอัตโนมัติ</a>
   </div>
 </div>
 
@@ -680,12 +681,29 @@ function showLightboxAt(index){
   if(index >= currentFiles.length) index = 0;
   lightboxIndex = index;
   const f = currentFiles[index];
-  lightboxImg.src = thumbUrl(f.id, 1200);
+
+  // Show the grid-size thumbnail immediately (already cached from the
+  // grid, so this paints instantly), then swap to the full-res version
+  // once it's loaded in the background — no visible blank/loading gap.
+  lightboxImg.src = thumbUrl(f.id, 400);
+  const hiRes = new Image();
+  hiRes.onload = () => { if(lightboxIndex === index) lightboxImg.src = hiRes.src; };
+  hiRes.src = thumbUrl(f.id, 1200);
+
   lightboxQr.innerHTML = '';
   lightboxQrLabel.textContent = STRINGS[lang].scanSave;
   const viewLink = `https://drive.google.com/file/d/${f.id}/view`;
   if(window.QRCode){ new QRCode(lightboxQr, { text: viewLink, width:70, height:70, colorDark:'#2B2823', colorLight:'#ffffff' }); }
   lightbox.classList.add('open');
+
+  // Preload the neighboring photos (both sizes) so the next/prev tap
+  // shows an already-cached image instead of waiting on a fresh request.
+  [index - 1, index + 1].forEach(ni => {
+    if(ni < 0 || ni >= currentFiles.length) return;
+    const nf = currentFiles[ni];
+    new Image().src = thumbUrl(nf.id, 400);
+    new Image().src = thumbUrl(nf.id, 1200);
+  });
 }
 function openLightbox(index){ showLightboxAt(index); }
 function closeLightbox(){ lightbox.classList.remove('open'); lightboxImg.src=''; lightboxIndex = -1; }
@@ -749,6 +767,7 @@ async function startDownloads(ids){
     return { row, status };
   });
   progressEl.textContent = `กำลังรวบรวมรูป 0 / ${files.length}...`;
+  document.getElementById('manualDownloadLink').style.display = 'none';
   downloadModal.classList.add('open');
 
   // Fetch every photo's actual bytes as File objects.
@@ -781,37 +800,55 @@ async function startDownloads(ids){
 
   // On mobile, the native share sheet lets guests tap "Save Images"/
   // "บันทึกรูปภาพ" to drop the photos straight into their Photos/Gallery
-  // app — no ZIP, no extracting. Desktop browsers don't support sharing
-  // files this way, so those fall back to a single ZIP download instead.
+  // app — no ZIP, no extracting. Desktop browsers (and any mobile browser
+  // where the share attempt fails for a reason other than the guest
+  // explicitly cancelling) fall back to a single ZIP download instead.
   const canUseShare = !!(navigator.canShare && navigator.canShare({ files: validFiles }));
+  let shareSucceeded = false;
 
   if(canUseShare){
     progressEl.textContent = 'เปิดหน้าต่างบันทึกรูป — เลือก "บันทึกรูปภาพ" เพื่อเก็บเข้าคลังภาพ';
     try{
       await navigator.share({ files: validFiles, title: 'รูปจากงานแต่งงาน' });
       progressEl.textContent = `ส่ง ${validFiles.length} รูปไปยังหน้าต่างบันทึกแล้ว`;
+      shareSucceeded = true;
     }catch(err){
-      progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
+      if(err && err.name === 'AbortError'){
+        progressEl.textContent = 'ยกเลิกการบันทึกรูป — ลองกดดาวน์โหลดใหม่อีกครั้งได้';
+        return;
+      }
+      // Any other failure (e.g. the share sheet couldn't open) — fall
+      // through to the ZIP path below instead of leaving the guest stuck.
+      progressEl.textContent = 'เปิดหน้าต่างบันทึกไม่สำเร็จ กำลังเตรียมไฟล์ ZIP แทน...';
     }
-    return;
   }
+
+  if(shareSucceeded) return;
 
   progressEl.textContent = 'กำลังบีบอัดเป็นไฟล์ ZIP...';
   const zip = new JSZip();
   validFiles.forEach(f => zip.file(f.name, f));
   const zipBlob = await zip.generateAsync({ type: 'blob' });
   const zipUrl = URL.createObjectURL(zipBlob);
+  const zipName = `bangkok-wedding-photos-${validFiles.length}-รูป.zip`;
+
   const a = document.createElement('a');
   a.href = zipUrl;
-  a.download = `bangkok-wedding-photos-${validFiles.length}-รูป.zip`;
+  a.download = zipName;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(zipUrl), 10000);
+
+  // Always leave a visible manual link too — some mobile browsers don't
+  // reliably auto-trigger a blob download, so this is the guaranteed fallback.
+  const manualLink = document.getElementById('manualDownloadLink');
+  manualLink.href = zipUrl;
+  manualLink.download = zipName;
+  manualLink.style.display = 'inline-block';
 
   progressEl.textContent = failCount > 0
-    ? `เสร็จสิ้น ${doneCount}/${files.length} รูป (พลาด ${failCount} รูป) — ไฟล์ ZIP ถูกดาวน์โหลดแล้ว`
-    : `เสร็จสิ้นครบ ${doneCount} รูป — ไฟล์ ZIP ถูกดาวน์โหลดแล้ว`;
+    ? `เสร็จสิ้น ${doneCount}/${files.length} รูป (พลาด ${failCount} รูป) — ไฟล์ ZIP พร้อมแล้ว`
+    : `เสร็จสิ้นครบ ${doneCount} รูป — ไฟล์ ZIP พร้อมแล้ว`;
 }
 
 btnDownload.addEventListener('click', () => {
