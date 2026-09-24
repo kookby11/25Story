@@ -93,9 +93,44 @@
     font-family:var(--couple-font); font-weight:600; font-style:italic;
     font-size:clamp(28px, 8vw, 38px); color:var(--ink); line-height:1.15; margin-bottom:8px;
   }
-  .event-meta{ font-size:11px; color:var(--ink-soft); }
+  .event-meta{ font-size:11px; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; gap:6px; }
+  .live-dot-inline{
+    width:7px; height:7px; border-radius:50%; background:#4C8A5E; flex-shrink:0;
+    animation: pulseDot 1.8s infinite;
+  }
+  .live-dot-inline.syncing{ background:#C9A24B; animation:none; }
+  .live-dot-inline.error{ background:var(--err); animation:none; }
+  @keyframes pulseDot{
+    0%{ box-shadow:0 0 0 0 rgba(76,138,94,0.5); }
+    70%{ box-shadow:0 0 0 6px rgba(76,138,94,0); }
+    100%{ box-shadow:0 0 0 0 rgba(76,138,94,0); }
+  }
+
+  .toast{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%) translateY(-20px);
+    background:var(--ink); color:var(--card); font-family:'Noto Serif Thai', serif; font-size:12px; font-weight:600;
+    padding:10px 18px; border-radius:999px; z-index:300; opacity:0; pointer-events:none;
+    transition: opacity 0.3s, transform 0.3s;
+    box-shadow:0 10px 30px rgba(0,0,0,0.25);
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  @keyframes newArrival{
+    from{ opacity:0; transform:scale(0.85); }
+    to{ opacity:1; transform:scale(1); }
+  }
+  .cell.new-arrival{ animation: newArrival 0.5s ease; }
+  .cell.new-arrival::before{
+    content:"ใหม่"; position:absolute; top:7px; left:7px; z-index:2;
+    background:var(--accent); color:#fff; font-family:'Noto Serif Thai', serif; font-size:9px; font-weight:600;
+    padding:2px 7px; border-radius:999px;
+  }
 
   .view-row{ display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-bottom:12px;}
+  .select-all-btn{
+    margin-right:auto; font-family:'Noto Serif Thai', serif; font-size:11px; font-weight:600;
+    background:var(--accent-soft); color:var(--accent); border:none; padding:7px 12px; border-radius:999px; cursor:pointer;
+  }
   .view-label{ font-size:11px; font-weight:700; letter-spacing:0.08em; color:var(--ink-soft);}
   .view-toggle{
     width:34px; height:34px; border-radius:50%; background:var(--accent-soft); border:none;
@@ -263,10 +298,11 @@
     <div class="event-block">
       <div class="event-sub" id="eventSub">ยินดีกับ</div>
       <h1 class="event-title" id="eventTitle">คู่บ่าวสาว</h1>
-      <div class="event-meta" id="eventMeta">— · — ภาพ · อัปเดตล่าสุด —</div>
+      <div class="event-meta"><span class="live-dot-inline" id="liveDotInline"></span><span id="eventMetaText">— · — ภาพ · อัปเดตล่าสุด —</span></div>
     </div>
 
     <div class="view-row">
+      <button class="select-all-btn hidden" id="selectAllBtn">เลือกทั้งหมด</button>
       <span class="view-label" id="viewLabel">VIEW</span>
       <button class="view-toggle" id="viewToggle" title="สลับความหนาแน่นของกริด">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
@@ -508,7 +544,8 @@ const grid = document.getElementById('grid');
 const statusBanner = document.getElementById('statusBanner');
 const eventTitle = document.getElementById('eventTitle');
 const eventSub = document.getElementById('eventSub');
-const eventMeta = document.getElementById('eventMeta');
+const eventMeta = document.getElementById('eventMetaText');
+const liveDotInline = document.getElementById('liveDotInline');
 const logoLetter = document.getElementById('logoLetter');
 const logoCircle = document.getElementById('logoCircle');
 const viewToggle = document.getElementById('viewToggle');
@@ -548,6 +585,8 @@ async function fetchDriveFiles(){
     allFiles = allFiles.concat(data.files || []);
     pageToken = data.nextPageToken || '';
   } while(pageToken);
+  // Guaranteed newest-first, regardless of how the API returned each page
+  allFiles.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
   return allFiles;
 }
 
@@ -563,7 +602,8 @@ function renderMeta(files){
   eventMeta.textContent = `${dateText} · ${files.length} ${t.photosWord} · ${t.updated} ${formatUpdated(files)}`;
 }
 
-function renderGrid(files){
+function renderGrid(files, newIds){
+  newIds = newIds || new Set();
   grid.innerHTML = '';
   if(files.length === 0){
     const note = document.createElement('div');
@@ -574,7 +614,7 @@ function renderGrid(files){
   }
   files.forEach((f, i) => {
     const cell = document.createElement('div');
-    cell.className = 'cell' + (selectedIds.has(f.id) ? ' selected' : '');
+    cell.className = 'cell' + (selectedIds.has(f.id) ? ' selected' : '') + (newIds.has(f.id) ? ' new-arrival' : '');
     cell.dataset.id = f.id;
     const img = document.createElement('img');
     img.src = thumbUrl(f.id, 400);
@@ -597,6 +637,7 @@ function renderGrid(files){
 function toggleSelect(id, cell){
   if(selectedIds.has(id)){ selectedIds.delete(id); cell.classList.remove('selected'); }
   else { selectedIds.add(id); cell.classList.add('selected'); }
+  updateSelectAllLabel();
 }
 
 function renderHero(){
@@ -644,16 +685,30 @@ async function refresh(){
     grid.appendChild(note);
     renderAdminPreview([]);
     showBanner('loading', lang==='th' ? 'ยังไม่ได้ตั้งค่าอัลบั้ม Google Drive' : 'No Google Drive album set yet');
+    liveDotInline.className = 'live-dot-inline error';
     return;
   }
+  liveDotInline.className = 'live-dot-inline syncing';
   try{
     const files = await fetchDriveFiles();
+
+    let newIds = new Set();
+    if(knownFileIds !== null){
+      newIds = new Set(files.map(f => f.id).filter(id => !knownFileIds.has(id)));
+      if(newIds.size > 0){
+        showToast(lang === 'th' ? `มีรูปใหม่ ${newIds.size} รูป` : `${newIds.size} new photo${newIds.size > 1 ? 's' : ''}`);
+      }
+    }
+    knownFileIds = new Set(files.map(f => f.id));
+
     currentFiles = files;
     renderMeta(files);
-    renderGrid(files);
+    renderGrid(files, newIds);
     renderAdminPreview(files);
     hideBanner();
+    liveDotInline.className = 'live-dot-inline';
   }catch(err){
+    liveDotInline.className = 'live-dot-inline error';
     if(err.status === 403){
       showBanner('error', lang==='th' ? 'เชื่อมต่อไม่ได้ (403) — ตรวจสอบการแชร์โฟลเดอร์และสิทธิ์ API Key' : 'Connection failed (403) — check folder sharing and API key permissions');
     } else if(err.status === 400){
@@ -698,7 +753,7 @@ function showLightboxAt(index){
 
   // Preload the neighboring photos (both sizes) so the next/prev tap
   // shows an already-cached image instead of waiting on a fresh request.
-  [index - 1, index + 1].forEach(ni => {
+  [index - 2, index - 1, index + 1, index + 2].forEach(ni => {
     if(ni < 0 || ni >= currentFiles.length) return;
     const nf = currentFiles[ni];
     new Image().src = thumbUrl(nf.id, 400);
@@ -738,8 +793,24 @@ btnSelect.addEventListener('click', () => {
   grid.classList.toggle('select-mode', selectMode);
   btnSelect.classList.toggle('active-toggle', selectMode);
   lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
+  document.getElementById('selectAllBtn').classList.toggle('hidden', !selectMode);
   if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
 });
+
+document.getElementById('selectAllBtn').addEventListener('click', () => {
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  if(allSelected){
+    selectedIds.clear();
+  } else {
+    currentFiles.forEach(f => selectedIds.add(f.id));
+  }
+  renderGrid(currentFiles);
+  updateSelectAllLabel();
+});
+function updateSelectAllLabel(){
+  const allSelected = currentFiles.length > 0 && currentFiles.every(f => selectedIds.has(f.id));
+  document.getElementById('selectAllBtn').textContent = allSelected ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด';
+}
 const downloadModal = document.getElementById('downloadModal');
 document.getElementById('downloadModalClose').addEventListener('click', () => downloadModal.classList.remove('open'));
 downloadModal.addEventListener('click', (e) => { if(e.target===downloadModal) downloadModal.classList.remove('open'); });
@@ -968,22 +1039,43 @@ fontSelect.addEventListener('change', () => {
   document.documentElement.style.setProperty('--couple-font', fontSelect.value);
 });
 
-// ---- logo upload ----
-document.getElementById('logoFileInput').addEventListener('change', (e) => {
+// ---- logo upload (with client-side compression so any reasonable file size works) ----
+function compressImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w >= h && w > maxDim){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else if(h > w && h > maxDim){ w = Math.round(w * maxDim / h); h = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('อ่านไฟล์รูปไม่สำเร็จ'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+document.getElementById('logoFileInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if(!file) return;
-  if(file.size > 1024*1024){
-    alert(lang==='th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 1MB' : 'File too large, please use an image under 1MB');
+  if(file.size > 8 * 1024 * 1024){
+    alert(lang === 'th' ? 'ไฟล์ใหญ่เกินไป กรุณาใช้รูปที่เล็กกว่า 8MB' : 'File too large, please use an image under 8MB');
     return;
   }
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const dataUrl = reader.result;
+  try{
+    const dataUrl = await compressImageFile(file, 500, 0.85);
     document.getElementById('logoPreview').innerHTML = `<img src="${dataUrl}">`;
     applyLogo(dataUrl);
-    await saveSetting(LOGO_KEY, dataUrl, true);
-  };
-  reader.readAsDataURL(file);
+    await saveSetting(LOGO_KEY, dataUrl);
+  }catch(err){
+    alert(lang === 'th' ? 'ประมวลผลรูปไม่สำเร็จ ลองรูปอื่นดูครับ' : 'Could not process that image, try another one');
+  }
 });
 function applyLogo(dataUrl){
   if(dataUrl){ logoCircle.innerHTML = `<img src="${dataUrl}">`; }
@@ -1007,6 +1099,21 @@ const COVER_KEY = 'bws-gallery2:cover-photo-id';
 let eventSubValue = '';
 let eventDateValue = '';
 let heroFileId = null;
+let knownFileIds = null; // null = first load, not yet established
+
+function showToast(text){
+  let toast = document.getElementById('newPhotoToast');
+  if(!toast){
+    toast = document.createElement('div');
+    toast.id = 'newPhotoToast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.classList.add('show');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+}
 
 async function saveSetting(key, value){
   try{
