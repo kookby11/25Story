@@ -51,7 +51,10 @@
     width:100%; aspect-ratio:16/10; border-radius:20px; overflow:hidden; position:relative;
     background: linear-gradient(150deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, black 20%) 100%);
   }
-  .hero-banner img{ width:100%; height:100%; object-fit:cover; display:block; transition:opacity 0.2s ease; }
+  .hero-img-layer{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+    opacity:0; transition:opacity 1.2s ease;
+  }
   .hero-placeholder{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     color:rgba(255,255,255,0.85); font-family:'Noto Serif Thai', serif; font-size:12px; text-align:center; padding:0 20px;
@@ -290,7 +293,8 @@
     <div class="hero-wrap">
       <div class="hero-banner" id="heroBanner">
         <div class="hero-placeholder" id="heroPlaceholder">ยังไม่ได้เลือกภาพหน้าปก</div>
-        <img id="heroImg" style="display:none;" alt="">
+        <img id="heroImgA" class="hero-img-layer" alt="">
+        <img id="heroImgB" class="hero-img-layer" alt="">
       </div>
       <div class="hero-actions">
         <button class="toggle-pill" id="themeToggle" title="สลับโหมดสว่าง/มืด"><span class="knob" id="themeKnob">☀️</span></button>
@@ -652,6 +656,35 @@ function toggleSelect(id, cell){
   updateSelectAllLabel();
 }
 
+let heroFront = 'A';
+function heroImgEl(which){ return document.getElementById(which === 'A' ? 'heroImgA' : 'heroImgB'); }
+
+function setHeroImageInstant(fileId){
+  const front = heroImgEl(heroFront);
+  const back = heroImgEl(heroFront === 'A' ? 'B' : 'A');
+  front.style.transition = 'none';
+  front.src = thumbUrl(fileId, 1000);
+  front.style.opacity = '1';
+  back.style.opacity = '0';
+  // restore the transition on the next frame so future crossfades still animate
+  requestAnimationFrame(() => { requestAnimationFrame(() => { front.style.transition = ''; }); });
+}
+
+function crossfadeHeroTo(fileId){
+  const backKey = heroFront === 'A' ? 'B' : 'A';
+  const back = heroImgEl(backKey);
+  const front = heroImgEl(heroFront);
+  back.src = thumbUrl(fileId, 1000);
+  back.style.opacity = '0';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      back.style.opacity = '1';
+      front.style.opacity = '0';
+    });
+  });
+  heroFront = backKey;
+}
+
 function stopHeroSlideshow(){
   if(heroSlideshowTimer){ clearInterval(heroSlideshowTimer); heroSlideshowTimer = null; }
 }
@@ -661,29 +694,24 @@ function startHeroSlideshow(){
   heroSlideshowTimer = setInterval(() => {
     if(heroMode !== 'slideshow' || currentFiles.length === 0) return;
     const pick = currentFiles[Math.floor(Math.random() * currentFiles.length)];
-    const heroImg = document.getElementById('heroImg');
-    heroImg.style.opacity = '0';
-    setTimeout(() => {
-      heroImg.src = thumbUrl(pick.id, 1000);
-      heroImg.style.opacity = '1';
-    }, 180);
+    crossfadeHeroTo(pick.id);
   }, 5000);
 }
 
 function renderHero(){
-  const heroImg = document.getElementById('heroImg');
   const heroPlaceholder = document.getElementById('heroPlaceholder');
 
   if(heroMode === 'slideshow'){
     if(currentFiles.length > 0){
-      heroImg.style.display = 'block';
-      heroImg.style.opacity = '1';
+      heroImgEl('A').style.display = 'block';
+      heroImgEl('B').style.display = 'block';
       heroPlaceholder.style.display = 'none';
-      if(!heroImg.src){ heroImg.src = thumbUrl(currentFiles[0].id, 1000); }
+      if(!heroImgEl(heroFront).src){ setHeroImageInstant(currentFiles[0].id); }
       startHeroSlideshow();
     } else {
       stopHeroSlideshow();
-      heroImg.style.display = 'none';
+      heroImgEl('A').style.display = 'none';
+      heroImgEl('B').style.display = 'none';
       heroPlaceholder.textContent = 'ยังไม่มีรูปในอัลบั้มสำหรับสไลด์โชว์';
       heroPlaceholder.style.display = 'flex';
     }
@@ -692,12 +720,13 @@ function renderHero(){
 
   stopHeroSlideshow();
   if(heroFileId){
-    heroImg.src = thumbUrl(heroFileId, 1000);
-    heroImg.style.opacity = '1';
-    heroImg.style.display = 'block';
+    heroImgEl('A').style.display = 'block';
+    heroImgEl('B').style.display = 'block';
+    setHeroImageInstant(heroFileId);
     heroPlaceholder.style.display = 'none';
   } else {
-    heroImg.style.display = 'none';
+    heroImgEl('A').style.display = 'none';
+    heroImgEl('B').style.display = 'none';
     heroPlaceholder.textContent = 'ยังไม่ได้เลือกภาพหน้าปก';
     heroPlaceholder.style.display = 'flex';
   }
