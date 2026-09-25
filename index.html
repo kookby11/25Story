@@ -55,10 +55,8 @@
     position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
     opacity:0; transition:opacity 1.2s ease; transform-origin:center center;
   }
-  @keyframes kenBurnsIn{ from{ transform:scale(1); } to{ transform:scale(1.15); } }
-  @keyframes kenBurnsOut{ from{ transform:scale(1.15); } to{ transform:scale(1); } }
-  .hero-img-layer.zoom-in{ animation:kenBurnsIn 6.2s ease-out forwards; }
-  .hero-img-layer.zoom-out{ animation:kenBurnsOut 6.2s ease-out forwards; }
+  @keyframes kenBurnsIn{ from{ transform:scale(1); } to{ transform:scale(1.08); } }
+  .hero-img-layer.zoom-in{ animation:kenBurnsIn 5s linear forwards; }
   .hero-placeholder{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     color:rgba(255,255,255,0.85); font-family:'Noto Serif Thai', serif; font-size:12px; text-align:center; padding:0 20px;
@@ -666,7 +664,7 @@ function heroImgEl(which){ return document.getElementById(which === 'A' ? 'heroI
 function applyKenBurns(el){
   el.classList.remove('zoom-in', 'zoom-out');
   void el.offsetWidth; // force reflow so the animation restarts cleanly
-  el.classList.add(Math.random() < 0.5 ? 'zoom-in' : 'zoom-out');
+  el.classList.add('zoom-in');
 }
 
 function setHeroImageInstant(fileId){
@@ -700,13 +698,14 @@ function crossfadeHeroTo(fileId){
 function stopHeroSlideshow(){
   if(heroSlideshowTimer){ clearInterval(heroSlideshowTimer); heroSlideshowTimer = null; }
 }
+let heroSlideIndex = 0;
 function startHeroSlideshow(){
   stopHeroSlideshow();
   if(currentFiles.length === 0) return;
   heroSlideshowTimer = setInterval(() => {
     if(heroMode !== 'slideshow' || currentFiles.length === 0) return;
-    const pick = currentFiles[Math.floor(Math.random() * currentFiles.length)];
-    crossfadeHeroTo(pick.id);
+    heroSlideIndex = (heroSlideIndex + 1) % currentFiles.length;
+    crossfadeHeroTo(currentFiles[heroSlideIndex].id);
   }, 5000);
 }
 
