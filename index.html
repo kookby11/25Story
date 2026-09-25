@@ -500,7 +500,7 @@
     <h2>รูปในอัลบั้ม / เลือกภาพหน้าปก</h2>
     <div class="hero-mode-row">
       <button class="hero-mode-btn active" id="heroModeStaticBtn" type="button">ภาพนิ่ง (เลือกเอง)</button>
-      <button class="hero-mode-btn" id="heroModeSlideshowBtn" type="button">สไลด์โชว์ (สุ่มทุก 1 วิ)</button>
+      <button class="hero-mode-btn" id="heroModeSlideshowBtn" type="button">สไลด์โชว์ (สุ่มทุก 5 วิ)</button>
     </div>
     <div class="admin-field" style="margin-bottom:10px;">
       <label id="coverPickerHint">เลื่อนดูรูปทั้งหมดในอัลบั้ม แล้วแตะรูปที่ต้องการเพื่อเลือกเป็นภาพหน้าปก (ด้านบนสุดของหน้าแกลเลอรี)</label>
@@ -667,7 +667,7 @@ function startHeroSlideshow(){
       heroImg.src = thumbUrl(pick.id, 1000);
       heroImg.style.opacity = '1';
     }, 180);
-  }, 1000);
+  }, 5000);
 }
 
 function renderHero(){
@@ -1277,7 +1277,7 @@ function setHeroModeUI(mode){
   heroModeSlideshowBtn.classList.toggle('active', mode === 'slideshow');
   const hint = document.getElementById('coverPickerHint');
   hint.textContent = mode === 'slideshow'
-    ? 'โหมดสไลด์โชว์: ระบบจะสุ่มแสดงรูปจากอัลบั้มทั้งหมดทุก 1 วินาทีอัตโนมัติ ไม่ต้องเลือกภาพหน้าปกเอง'
+    ? 'โหมดสไลด์โชว์: ระบบจะสุ่มแสดงรูปจากอัลบั้มทั้งหมดทุก 5 วินาทีอัตโนมัติ ไม่ต้องเลือกภาพหน้าปกเอง'
     : 'เลื่อนดูรูปทั้งหมดในอัลบั้ม แล้วแตะรูปที่ต้องการเพื่อเลือกเป็นภาพหน้าปก (ด้านบนสุดของหน้าแกลเลอรี)';
 }
 heroModeStaticBtn.addEventListener('click', async () => {
