@@ -51,7 +51,7 @@
     width:100%; aspect-ratio:16/10; border-radius:20px; overflow:hidden; position:relative;
     background: linear-gradient(150deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, black 20%) 100%);
   }
-  .hero-banner img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .hero-banner img{ width:100%; height:100%; object-fit:cover; display:block; transition:opacity 0.2s ease; }
   .hero-placeholder{
     position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     color:rgba(255,255,255,0.85); font-family:'Noto Serif Thai', serif; font-size:12px; text-align:center; padding:0 20px;
@@ -266,6 +266,14 @@
   .swatch-custom input[type="color"]{ position:absolute; inset:-4px; width:200%; height:200%; cursor:pointer; border:none;}
 
   .font-preview{ font-size:20px; margin-top:6px; color:var(--ink); }
+
+  .hero-mode-row{ display:flex; gap:8px; margin-bottom:14px; }
+  .hero-mode-btn{
+    flex:1; font-family:'Noto Serif Thai', serif; font-size:11.5px; font-weight:600;
+    background:var(--bg); border:1.5px solid var(--line); color:var(--ink-soft);
+    padding:9px 8px; border-radius:10px; cursor:pointer; transition:0.15s;
+  }
+  .hero-mode-btn.active{ border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
 
   .admin-photo-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; max-height:340px; overflow-y:auto; padding-right:2px; }
   .admin-photo-cell{ position:relative; width:100%; padding-bottom:100%; border-radius:8px; overflow:hidden; background:var(--accent-soft); cursor:pointer; border:2px solid transparent;}
@@ -490,8 +498,12 @@
 
   <div class="admin-card">
     <h2>รูปในอัลบั้ม / เลือกภาพหน้าปก</h2>
+    <div class="hero-mode-row">
+      <button class="hero-mode-btn active" id="heroModeStaticBtn" type="button">ภาพนิ่ง (เลือกเอง)</button>
+      <button class="hero-mode-btn" id="heroModeSlideshowBtn" type="button">สไลด์โชว์ (สุ่มทุก 1 วิ)</button>
+    </div>
     <div class="admin-field" style="margin-bottom:10px;">
-      <label>เลื่อนดูรูปทั้งหมดในอัลบั้ม แล้วแตะรูปที่ต้องการเพื่อเลือกเป็นภาพหน้าปก (ด้านบนสุดของหน้าแกลเลอรี)</label>
+      <label id="coverPickerHint">เลื่อนดูรูปทั้งหมดในอัลบั้ม แล้วแตะรูปที่ต้องการเพื่อเลือกเป็นภาพหน้าปก (ด้านบนสุดของหน้าแกลเลอรี)</label>
     </div>
     <div class="admin-photo-grid" id="adminPhotoGrid"></div>
     <div class="admin-save-row" style="margin-top:12px;">
@@ -640,15 +652,53 @@ function toggleSelect(id, cell){
   updateSelectAllLabel();
 }
 
+function stopHeroSlideshow(){
+  if(heroSlideshowTimer){ clearInterval(heroSlideshowTimer); heroSlideshowTimer = null; }
+}
+function startHeroSlideshow(){
+  stopHeroSlideshow();
+  if(currentFiles.length === 0) return;
+  heroSlideshowTimer = setInterval(() => {
+    if(heroMode !== 'slideshow' || currentFiles.length === 0) return;
+    const pick = currentFiles[Math.floor(Math.random() * currentFiles.length)];
+    const heroImg = document.getElementById('heroImg');
+    heroImg.style.opacity = '0';
+    setTimeout(() => {
+      heroImg.src = thumbUrl(pick.id, 1000);
+      heroImg.style.opacity = '1';
+    }, 180);
+  }, 1000);
+}
+
 function renderHero(){
   const heroImg = document.getElementById('heroImg');
   const heroPlaceholder = document.getElementById('heroPlaceholder');
+
+  if(heroMode === 'slideshow'){
+    if(currentFiles.length > 0){
+      heroImg.style.display = 'block';
+      heroImg.style.opacity = '1';
+      heroPlaceholder.style.display = 'none';
+      if(!heroImg.src){ heroImg.src = thumbUrl(currentFiles[0].id, 1000); }
+      startHeroSlideshow();
+    } else {
+      stopHeroSlideshow();
+      heroImg.style.display = 'none';
+      heroPlaceholder.textContent = 'ยังไม่มีรูปในอัลบั้มสำหรับสไลด์โชว์';
+      heroPlaceholder.style.display = 'flex';
+    }
+    return;
+  }
+
+  stopHeroSlideshow();
   if(heroFileId){
     heroImg.src = thumbUrl(heroFileId, 1000);
+    heroImg.style.opacity = '1';
     heroImg.style.display = 'block';
     heroPlaceholder.style.display = 'none';
   } else {
     heroImg.style.display = 'none';
+    heroPlaceholder.textContent = 'ยังไม่ได้เลือกภาพหน้าปก';
     heroPlaceholder.style.display = 'flex';
   }
 }
@@ -705,6 +755,7 @@ async function refresh(){
     renderMeta(files);
     renderGrid(files, newIds);
     renderAdminPreview(files);
+    renderHero();
     hideBanner();
     liveDotInline.className = 'live-dot-inline';
   }catch(err){
@@ -1095,10 +1146,13 @@ const LOGO_KEY = 'bws-gallery2:logo-data-url';
 const FONT_KEY = 'bws-gallery2:couple-font';
 const PASSWORD_KEY = 'bws-gallery2:admin-password';
 const COVER_KEY = 'bws-gallery2:cover-photo-id';
+const HERO_MODE_KEY = 'bws-gallery2:hero-mode';
 
 let eventSubValue = '';
 let eventDateValue = '';
 let heroFileId = null;
+let heroMode = 'static'; // 'static' | 'slideshow'
+let heroSlideshowTimer = null;
 let knownFileIds = null; // null = first load, not yet established
 
 function showToast(text){
@@ -1142,14 +1196,16 @@ function parseFolderId(input){
 }
 
 async function loadAllSettings(){
-  const [brand, sub, couple, date, folder, theme, savedLang, accent, logo, font, cover, bg] = await Promise.all([
+  const [brand, sub, couple, date, folder, theme, savedLang, accent, logo, font, cover, bg, heroModeSaved] = await Promise.all([
     loadSetting(BRAND_KEY, true), loadSetting(EVENT_SUB_KEY, true), loadSetting(COUPLE_KEY, true),
     loadSetting(EVENT_DATE_KEY, true), loadSetting(FOLDER_KEY, true), loadSetting(THEME_MODE_KEY, false),
     loadSetting(LANG_KEY, false), loadSetting(ACCENT_KEY, true), loadSetting(LOGO_KEY, true), loadSetting(FONT_KEY, true),
-    loadSetting(COVER_KEY, true), loadSetting(BG_KEY, true),
+    loadSetting(COVER_KEY, true), loadSetting(BG_KEY, true), loadSetting(HERO_MODE_KEY, true),
   ]);
 
   if(cover){ heroFileId = cover; }
+  heroMode = (heroModeSaved === 'slideshow') ? 'slideshow' : 'static';
+  setHeroModeUI(heroMode);
   renderHero();
 
   if(brand){ logoLetter.textContent = brand.trim().charAt(0).toUpperCase(); }
@@ -1212,6 +1268,29 @@ document.getElementById('coverResetBtn').addEventListener('click', async () => {
   renderHero();
   renderAdminPreview(currentFiles);
   status.textContent = 'รีเซ็ตแล้ว ✓';
+});
+
+const heroModeStaticBtn = document.getElementById('heroModeStaticBtn');
+const heroModeSlideshowBtn = document.getElementById('heroModeSlideshowBtn');
+function setHeroModeUI(mode){
+  heroModeStaticBtn.classList.toggle('active', mode === 'static');
+  heroModeSlideshowBtn.classList.toggle('active', mode === 'slideshow');
+  const hint = document.getElementById('coverPickerHint');
+  hint.textContent = mode === 'slideshow'
+    ? 'โหมดสไลด์โชว์: ระบบจะสุ่มแสดงรูปจากอัลบั้มทั้งหมดทุก 1 วินาทีอัตโนมัติ ไม่ต้องเลือกภาพหน้าปกเอง'
+    : 'เลื่อนดูรูปทั้งหมดในอัลบั้ม แล้วแตะรูปที่ต้องการเพื่อเลือกเป็นภาพหน้าปก (ด้านบนสุดของหน้าแกลเลอรี)';
+}
+heroModeStaticBtn.addEventListener('click', async () => {
+  heroMode = 'static';
+  setHeroModeUI('static');
+  renderHero();
+  await saveSetting(HERO_MODE_KEY, 'static');
+});
+heroModeSlideshowBtn.addEventListener('click', async () => {
+  heroMode = 'slideshow';
+  setHeroModeUI('slideshow');
+  renderHero();
+  await saveSetting(HERO_MODE_KEY, 'slideshow');
 });
 
 document.getElementById('saveCoverBtn').addEventListener('click', async () => {
