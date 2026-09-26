@@ -255,12 +255,16 @@
     border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--ink);
   }
   .admin-field input:focus, .admin-field select:focus{ outline:none; border-color:var(--accent); }
-  .admin-save-row{ display:flex; align-items:center; gap:10px; }
+  .admin-save-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .admin-btn{
     font-family:'Noto Serif Thai', serif; font-size:12.5px; font-weight:600;
     background:var(--ink); color:var(--card); border:none; padding:9px 18px; border-radius:999px; cursor:pointer;
   }
+  .admin-btn:disabled{ opacity:0.5; cursor:not-allowed; }
   .admin-status{ font-size:10.5px; color:var(--ink-soft); }
+
+  .progress-track{ height:6px; background:var(--accent-soft); border-radius:999px; overflow:hidden; margin-top:8px; }
+  .progress-fill{ height:100%; width:0%; background:var(--accent); transition:width 0.2s; }
 
   .logo-upload-row{ display:flex; align-items:center; gap:14px; margin-bottom:12px; }
   .logo-preview{
@@ -395,11 +399,11 @@
     <h3>ค้นหาภาพด้วยใบหน้า</h3>
     <div class="modal-hint" style="margin-bottom:14px;">ถ่ายภาพหรืออัพโหลดภาพใบหน้าของคุณ เพื่อค้นหารูปที่คุณอยู่ในอัลบั้ม</div>
     <div style="display:flex; gap:10px; margin-bottom:12px;">
-      <label class="admin-btn" style="flex:1; text-align:center; cursor:pointer; display:block;">
+      <label class="admin-btn" id="faceCaptureLabel" style="flex:1; text-align:center; cursor:pointer; display:block;">
         📷 ถ่ายภาพใบหน้า
         <input type="file" accept="image/*" capture="user" id="faceCaptureInput" style="display:none;">
       </label>
-      <label class="admin-btn" style="flex:1; text-align:center; cursor:pointer; display:block; background:var(--accent);">
+      <label class="admin-btn" id="faceUploadLabel" style="flex:1; text-align:center; cursor:pointer; display:block; background:var(--accent);">
         🖼️ ใช้ภาพใบหน้า
         <input type="file" accept="image/*" id="faceUploadInput" style="display:none;">
       </label>
@@ -533,13 +537,15 @@
   <div class="admin-card">
     <h2>ดัชนีค้นหาใบหน้า</h2>
     <div class="admin-field" style="margin-bottom:10px;">
-      <label>สแกนหาใบหน้าในทุกรูปของอัลบั้มไว้ล่วงหน้า เพื่อให้แขกค้นหารูปตัวเองได้ (ทำครั้งเดียว รูปใหม่ที่เพิ่มเข้ามาทีหลังต้องกดสแกนซ้ำ)</label>
+      <label>สแกนหาใบหน้าในทุกรูปของอัลบั้มไว้ล่วงหน้า เพื่อให้แขกค้นหารูปตัวเองได้ (ทำครั้งเดียว รูปใหม่ที่เพิ่มเข้ามาทีหลังต้องกดสแกนซ้ำ) — สแกนเร็วขึ้นด้วยการย่อขนาดรูปและประมวลผลแบบขนาน</label>
     </div>
     <div class="admin-save-row">
       <button class="admin-btn" id="buildFaceIndexBtn">สร้าง/อัพเดตดัชนีใบหน้า</button>
+      <button class="admin-btn" id="cancelFaceIndexBtn" style="background:var(--ink-soft); display:none;">หยุด</button>
       <button class="admin-btn" id="resetFaceIndexBtn" style="background:var(--err);">ล้างดัชนี</button>
     </div>
     <div class="admin-status" id="faceIndexStatus" style="margin-top:8px;"></div>
+    <div class="progress-track"><div class="progress-fill" id="faceIndexProgressBar"></div></div>
   </div>
 
   <div class="admin-card">
@@ -573,9 +579,9 @@
 
 <script>
 // ========= CONFIG =========
-const API_KEY = 'AIzaSyAKYbYpuXUxG7VlW8AdRga9tPNU7oLJKLY';
+const API_KEY = '***************************************';
 const FIREBASE_DB_URL = 'https://bangkok-wedding-studio-c76a0-default-rtdb.asia-southeast1.firebasedatabase.app';
-const DEFAULT_PASSWORD = 'bws2026';
+const DEFAULT_PASSWORD = '*******';
 const POLL_MS = 8000;
 let FOLDER_ID = null;
 let currentFiles = [];
@@ -756,19 +762,62 @@ let faceSearchActive = false;
 let faceSearchMatchIds = new Set();
 const FACE_INDEX_KEY = 'bws-gallery2:face-index';
 
+// ---- face-api loading + fast config (speed fixes) ----
+let tfBackendReady = false;
+let faceApiLoadingPromise = null;
+
 async function ensureFaceApiLoaded(){
-  if(window.faceapi) return;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('โหลดไลบรารีจดจำใบหน้าไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต'));
-    document.head.appendChild(s);
-  });
-  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-  await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-  await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+  if(window.faceapi && tfBackendReady) return;
+  if(!faceApiLoadingPromise){
+    faceApiLoadingPromise = (async () => {
+      if(!window.faceapi){
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+          s.onload = resolve;
+          s.onerror = () => reject(new Error('โหลดไลบรารีจดจำใบหน้าไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต'));
+          document.head.appendChild(s);
+        });
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      }
+      // Force GPU (WebGL) backend when available — much faster than the
+      // default CPU backend on most phones/laptops. Falls back to CPU
+      // quietly if WebGL isn't supported.
+      try{
+        await faceapi.tf.setBackend('webgl');
+        await faceapi.tf.ready();
+      }catch(err){
+        try{ await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready(); }catch(e2){ /* ignore */ }
+      }
+      tfBackendReady = true;
+    })();
+  }
+  return faceApiLoadingPromise;
+}
+
+// Smaller inputSize (224 instead of the 416 default) = much faster detection
+// with barely any accuracy loss for single-face selfies / group photos.
+function getFastDetectorOptions(){
+  return new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+}
+
+// Downscaling before detection is the single biggest speed win: a 12MP
+// wedding photo takes far longer to decode + run through the network than
+// a 640px version, and accuracy for face matching barely changes.
+function downscaleImageToCanvas(img, maxDim){
+  maxDim = maxDim || 640;
+  let w = img.width, h = img.height;
+  if(w > maxDim || h > maxDim){
+    if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+    else{ w = Math.round(w * maxDim / h); h = maxDim; }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return canvas;
 }
 
 function loadImageFromUrl(src){
@@ -1152,9 +1201,11 @@ function toggleLang(){
 langPillTop.addEventListener('click', toggleLang);
 btnLang.addEventListener('click', toggleLang);
 
-// ---- face search ----
+// ---- face search (guest side) ----
 const faceSearchModal = document.getElementById('faceSearchModal');
 const faceSearchStatus = document.getElementById('faceSearchStatus');
+const faceCaptureLabel = document.getElementById('faceCaptureLabel');
+const faceUploadLabel = document.getElementById('faceUploadLabel');
 document.getElementById('btnFaceSearch').addEventListener('click', () => {
   faceSearchStatus.textContent = '';
   faceSearchModal.classList.add('open');
@@ -1162,34 +1213,46 @@ document.getElementById('btnFaceSearch').addEventListener('click', () => {
 document.getElementById('faceSearchModalClose').addEventListener('click', () => faceSearchModal.classList.remove('open'));
 faceSearchModal.addEventListener('click', (e) => { if(e.target === faceSearchModal) faceSearchModal.classList.remove('open'); });
 
+function setFaceSearchBusy(busy){
+  faceCaptureLabel.style.pointerEvents = busy ? 'none' : '';
+  faceUploadLabel.style.pointerEvents = busy ? 'none' : '';
+  faceCaptureLabel.style.opacity = busy ? '0.5' : '';
+  faceUploadLabel.style.opacity = busy ? '0.5' : '';
+}
+
 async function handleFaceSearchFile(file){
   if(!file) return;
-  faceSearchStatus.textContent = 'กำลังโหลดระบบจดจำใบหน้า (ครั้งแรกอาจใช้เวลาสักครู่)...';
-  try{ await ensureFaceApiLoaded(); }catch(err){ faceSearchStatus.textContent = err.message; return; }
+  setFaceSearchBusy(true);
+  faceSearchStatus.textContent = '⏳ กำลังโหลดระบบจดจำใบหน้า (ครั้งแรกอาจใช้เวลาสักครู่)...';
+  try{ await ensureFaceApiLoaded(); }catch(err){ faceSearchStatus.textContent = err.message; setFaceSearchBusy(false); return; }
 
-  faceSearchStatus.textContent = 'กำลังวิเคราะห์ใบหน้าของคุณ...';
+  faceSearchStatus.textContent = '⏳ กำลังวิเคราะห์ใบหน้าของคุณ...';
   const blobUrl = URL.createObjectURL(file);
   let detection;
   try{
     const img = await loadImageFromUrl(blobUrl);
-    detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+    const canvas = downscaleImageToCanvas(img, 640);
+    detection = await faceapi.detectSingleFace(canvas, getFastDetectorOptions())
       .withFaceLandmarks().withFaceDescriptor();
   }catch(err){
     faceSearchStatus.textContent = 'วิเคราะห์ภาพไม่สำเร็จ ลองใหม่อีกครั้ง';
     URL.revokeObjectURL(blobUrl);
+    setFaceSearchBusy(false);
     return;
   }
   URL.revokeObjectURL(blobUrl);
 
   if(!detection){
     faceSearchStatus.textContent = 'ไม่พบใบหน้าในภาพ ลองถ่าย/เลือกภาพใหม่ที่เห็นหน้าชัดๆ';
+    setFaceSearchBusy(false);
     return;
   }
 
-  faceSearchStatus.textContent = 'กำลังค้นหาในอัลบั้ม...';
+  faceSearchStatus.textContent = '⏳ กำลังค้นหาในอัลบั้ม...';
   const faceIndex = (await loadSetting(FACE_INDEX_KEY, true)) || {};
   if(Object.keys(faceIndex).length === 0){
     faceSearchStatus.textContent = 'ยังไม่มีดัชนีใบหน้า — แจ้งทีมงานให้กดสร้างดัชนีในหลังบ้านก่อน';
+    setFaceSearchBusy(false);
     return;
   }
 
@@ -1201,6 +1264,8 @@ async function handleFaceSearchFile(file){
       if(dist < threshold){ matchIds.push(fileId); break; }
     }
   }
+
+  setFaceSearchBusy(false);
 
   if(matchIds.length === 0){
     faceSearchStatus.textContent = 'ไม่พบรูปที่มีคุณในอัลบั้ม ลองมุมอื่นดู หรืออาจยังไม่ได้อัพเดตดัชนี';
@@ -1217,8 +1282,8 @@ async function handleFaceSearchFile(file){
   showToast(`พบ ${matchIds.length} รูปที่มีคุณ`);
 }
 
-document.getElementById('faceCaptureInput').addEventListener('change', (e) => handleFaceSearchFile(e.target.files[0]));
-document.getElementById('faceUploadInput').addEventListener('change', (e) => handleFaceSearchFile(e.target.files[0]));
+document.getElementById('faceCaptureInput').addEventListener('change', (e) => { handleFaceSearchFile(e.target.files[0]); e.target.value = ''; });
+document.getElementById('faceUploadInput').addEventListener('change', (e) => { handleFaceSearchFile(e.target.files[0]); e.target.value = ''; });
 
 document.getElementById('clearFaceFilterBtn').addEventListener('click', () => {
   faceSearchActive = false;
@@ -1227,10 +1292,18 @@ document.getElementById('clearFaceFilterBtn').addEventListener('click', () => {
   renderGrid(currentFiles, new Set());
 });
 
-// ---- admin: build / reset face index ----
+// ---- admin: build / reset face index (fast pipeline version) ----
+let faceIndexCancelRequested = false;
+
 document.getElementById('buildFaceIndexBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('faceIndexStatus');
-  statusEl.textContent = 'กำลังโหลดโมเดล (ครั้งแรกอาจใช้เวลาสักครู่)...';
+  const progressBar = document.getElementById('faceIndexProgressBar');
+  const buildBtn = document.getElementById('buildFaceIndexBtn');
+  const cancelBtn = document.getElementById('cancelFaceIndexBtn');
+
+  faceIndexCancelRequested = false;
+  statusEl.textContent = '⏳ กำลังโหลดโมเดล (ครั้งแรกอาจใช้เวลาสักครู่)...';
+  progressBar.style.width = '0%';
   try{ await ensureFaceApiLoaded(); }catch(err){ statusEl.textContent = err.message; return; }
 
   const existing = (await loadSetting(FACE_INDEX_KEY, true)) || {};
@@ -1240,29 +1313,92 @@ document.getElementById('buildFaceIndexBtn').addEventListener('click', async () 
     return;
   }
 
+  buildBtn.disabled = true;
+  cancelBtn.style.display = 'inline-block';
+  const detectorOptions = getFastDetectorOptions();
+
+  // Pipeline: several "fetcher" workers download + decode + downscale images
+  // in parallel (I/O-bound), feeding a queue that a single detector consumes
+  // one at a time (CPU/GPU-bound, must stay sequential). This overlaps
+  // network time with detection time instead of doing everything
+  // strictly one-after-another — the main reason indexing used to feel slow.
+  const CONCURRENCY = 4;
+  let nextFetchIndex = 0;
+  let processedCount = 0;
+  let savedSinceLastFlush = 0;
+
+  const readyQueue = [];
+  const waiters = [];
+  function pushReady(item){
+    if(waiters.length > 0){ waiters.shift()(item); }
+    else{ readyQueue.push(item); }
+  }
+  function popReady(){
+    if(readyQueue.length > 0) return Promise.resolve(readyQueue.shift());
+    return new Promise(resolve => waiters.push(resolve));
+  }
+
+  function startFetcher(){
+    (async () => {
+      while(nextFetchIndex < toProcess.length && !faceIndexCancelRequested){
+        const myIndex = nextFetchIndex++;
+        const f = toProcess[myIndex];
+        let blobUrl = null, canvas = null, error = null;
+        try{
+          blobUrl = await fetchImageAsBlobUrl(f.id);
+          const img = await loadImageFromUrl(blobUrl);
+          canvas = downscaleImageToCanvas(img, 640);
+        }catch(err){ error = err; }
+        finally{ if(blobUrl) URL.revokeObjectURL(blobUrl); }
+        pushReady({ f, canvas, error });
+      }
+    })();
+  }
+  for(let i = 0; i < CONCURRENCY; i++) startFetcher();
+
   for(let i = 0; i < toProcess.length; i++){
-    statusEl.textContent = `กำลังสแกนใบหน้า ${i + 1} / ${toProcess.length} รูป...`;
-    const f = toProcess[i];
-    let blobUrl;
-    try{
-      blobUrl = await fetchImageAsBlobUrl(f.id);
-      const img = await loadImageFromUrl(blobUrl);
-      const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks().withFaceDescriptors();
-      existing[f.id] = detections.map(d => Array.from(d.descriptor));
-    }catch(err){
+    if(faceIndexCancelRequested) break;
+    const { f, canvas, error } = await popReady();
+    if(error || !canvas){
       existing[f.id] = [];
-    }finally{
-      if(blobUrl) URL.revokeObjectURL(blobUrl);
+    } else {
+      try{
+        const detections = await faceapi.detectAllFaces(canvas, detectorOptions)
+          .withFaceLandmarks().withFaceDescriptors();
+        existing[f.id] = detections.map(d => Array.from(d.descriptor));
+      }catch(err){
+        existing[f.id] = [];
+      }
+    }
+    processedCount++;
+    savedSinceLastFlush++;
+    const pct = Math.round((processedCount / toProcess.length) * 100);
+    progressBar.style.width = pct + '%';
+    statusEl.textContent = `กำลังสแกนใบหน้า ${processedCount} / ${toProcess.length} รูป (${pct}%)`;
+    // Persist progress periodically so a mid-way cancel/refresh doesn't lose work.
+    if(savedSinceLastFlush >= 20){
+      await saveSetting(FACE_INDEX_KEY, existing);
+      savedSinceLastFlush = 0;
     }
   }
+
   await saveSetting(FACE_INDEX_KEY, existing);
-  statusEl.textContent = `สแกนเสร็จแล้ว ${toProcess.length} รูปใหม่ — รวมดัชนีทั้งหมด ${Object.keys(existing).length} รูป`;
+  buildBtn.disabled = false;
+  cancelBtn.style.display = 'none';
+  statusEl.textContent = faceIndexCancelRequested
+    ? `หยุดแล้ว — สแกนไปแล้ว ${processedCount} / ${toProcess.length} รูป (บันทึกความคืบหน้าไว้แล้ว กด "สร้าง/อัพเดตดัชนีใบหน้า" เพื่อสแกนต่อได้)`
+    : `สแกนเสร็จแล้ว ${processedCount} รูปใหม่ — รวมดัชนีทั้งหมด ${Object.keys(existing).length} รูป`;
+});
+
+document.getElementById('cancelFaceIndexBtn').addEventListener('click', () => {
+  faceIndexCancelRequested = true;
 });
 
 document.getElementById('resetFaceIndexBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('faceIndexStatus');
+  const progressBar = document.getElementById('faceIndexProgressBar');
   statusEl.textContent = 'กำลังล้างดัชนี...';
+  progressBar.style.width = '0%';
   await saveSetting(FACE_INDEX_KEY, null);
   statusEl.textContent = 'ล้างดัชนีแล้ว — กด "สร้าง/อัพเดตดัชนีใบหน้า" เพื่อสแกนใหม่ทั้งหมด';
 });
