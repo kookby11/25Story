@@ -755,22 +755,36 @@ let displayedFiles = [];
 let faceSearchActive = false;
 let faceSearchMatchIds = new Set();
 const FACE_INDEX_KEY = 'bws-gallery2:face-index';
+const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 
+// Core models: needed for both indexing and guest search.
 async function ensureFaceApiLoaded(){
-  if(window.faceapi) return;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('โหลดไลบรารีจดจำใบหน้าไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต'));
-    document.head.appendChild(s);
-  });
-  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+  if(!window.faceapi){
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('โหลดไลบรารีจดจำใบหน้าไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต'));
+      document.head.appendChild(s);
+    });
+  }
+  if(faceapi.nets.tinyFaceDetector.isLoaded) return;
   await Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+    faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+    faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+    faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL),
   ]);
+}
+
+// SsdMobilenetv1 finds faces far more reliably than the tiny detector —
+// especially small/angled faces in group wedding shots — at the cost of
+// being slower per photo. Only load/use it for the (background, one-time)
+// indexing pass, not for every guest doing a live search, so guests don't
+// pay for an extra ~5MB model download they don't need.
+async function ensureSsdModelLoaded(){
+  await ensureFaceApiLoaded();
+  if(faceapi.nets.ssdMobilenetv1.isLoaded) return;
+  await faceapi.nets.ssdMobilenetv1.loadFromUri(FACE_MODEL_URL);
 }
 
 function loadImageFromUrl(src){
@@ -782,25 +796,118 @@ function loadImageFromUrl(src){
   });
 }
 
-// Wedding photos are often 4000px+ wide — way more detail than face
-// detection needs. Drawing down to a small canvas first makes both the
-// detector and the descriptor pass run much faster, with no real loss
-// in match accuracy.
-function resizeImageToCanvas(img, maxDim){
+// Only cap truly oversized photos (e.g. 6000px+ camera originals). Shrinking
+// too aggressively (as a previous version of this code did, down to
+// ~1000px) makes small faces in group photos blur into a handful of pixels
+// once cropped for recognition, which is what was causing bad matches. This
+// cap only kicks in for genuinely huge files, and still leaves faces sharp.
+function capImageSize(img, maxDim){
+  if(img.width <= maxDim && img.height <= maxDim) return img;
   let w = img.width, h = img.height;
-  if(w > maxDim || h > maxDim){
-    if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
-    else { w = Math.round(w * maxDim / h); h = maxDim; }
-  }
+  if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+  else { w = Math.round(w * maxDim / h); h = maxDim; }
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   canvas.getContext('2d').drawImage(img, 0, 0, w, h);
   return canvas;
 }
-// A smaller inputSize (default is 416) trades a little accuracy for a
-// solid speed boost — plenty for finding/encoding faces in photos.
-function fastDetectorOptions(){
-  return new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+function indexDetectorOptions(){
+  return new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 });
+}
+function guestSearchDetectorOptions(){
+  return new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
+}
+// 0.6 is face-api's own recommended cutoff for "same person" — the previous
+// 0.55 was stricter than that, which quietly threw away correct matches.
+const FACE_MATCH_THRESHOLD = 0.6;
+
+// In-memory copy of the face index, shared between the manual "build index"
+// button and the automatic background indexing below, so we don't re-fetch
+// the whole index from the database on every poll.
+let faceIndexCache = null;
+async function getFaceIndexCache(){
+  if(faceIndexCache === null){ faceIndexCache = (await loadSetting(FACE_INDEX_KEY, true)) || {}; }
+  return faceIndexCache;
+}
+
+let isIndexing = false;
+// Shared by the manual button and the automatic new-photo indexing.
+// opts.auto = true gives a distinct "auto" status message and uses a
+// slightly lighter touch on saving (still periodic, so a closed tab never
+// loses more than ~20 photos of progress).
+async function indexFiles(filesToIndex, statusEl, opts){
+  opts = opts || {};
+  if(isIndexing){ if(statusEl && !opts.auto) statusEl.textContent = 'กำลังทำดัชนีอยู่แล้ว รอสักครู่...'; return; }
+  isIndexing = true;
+  try{
+    await ensureSsdModelLoaded();
+    const existing = await getFaceIndexCache();
+    const toProcess = filesToIndex.filter(f => !(f.id in existing));
+    if(toProcess.length === 0){
+      if(statusEl) statusEl.textContent = opts.auto
+        ? `ดัชนีอัพเดตล่าสุดแล้ว (${Object.keys(existing).length} รูป)`
+        : `ดัชนีครบถ้วนแล้ว (${Object.keys(existing).length} รูป) ไม่มีรูปใหม่ต้องสแกน`;
+      return;
+    }
+
+    // Several photos in flight at once (download + detect overlap) instead
+    // of waiting for each one to fully finish — this is what actually makes
+    // indexing fast, without needing to shrink photos and hurt accuracy.
+    const CONCURRENCY = 4;
+    let completed = 0;
+    let nextIndex = 0;
+
+    async function processOne(f){
+      let blobUrl;
+      try{
+        blobUrl = await fetchImageAsBlobUrl(f.id);
+        const img = await loadImageFromUrl(blobUrl);
+        const capped = capImageSize(img, 2200);
+        const detections = await faceapi.detectAllFaces(capped, indexDetectorOptions())
+          .withFaceLandmarks().withFaceDescriptors();
+        existing[f.id] = detections.map(d => Array.from(d.descriptor));
+      }catch(err){
+        existing[f.id] = [];
+      }finally{
+        if(blobUrl) URL.revokeObjectURL(blobUrl);
+      }
+      completed++;
+      if(statusEl){
+        statusEl.textContent = opts.auto
+          ? `🟢 กำลังทำดัชนีรูปใหม่อัตโนมัติ ${completed} / ${toProcess.length}...`
+          : `กำลังสแกนใบหน้า ${completed} / ${toProcess.length} รูป...`;
+      }
+      if(completed % 20 === 0){ await saveSetting(FACE_INDEX_KEY, existing); }
+    }
+    async function worker(){
+      while(nextIndex < toProcess.length){
+        const f = toProcess[nextIndex++];
+        await processOne(f);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, toProcess.length) }, worker));
+    await saveSetting(FACE_INDEX_KEY, existing);
+    if(statusEl){
+      statusEl.textContent = opts.auto
+        ? `✓ ทำดัชนีรูปใหม่อัตโนมัติเสร็จแล้ว ${toProcess.length} รูป — รวมทั้งหมด ${Object.keys(existing).length} รูป`
+        : `สแกนเสร็จแล้ว ${toProcess.length} รูปใหม่ — รวมดัชนีทั้งหมด ${Object.keys(existing).length} รูป`;
+    }
+  } finally {
+    isIndexing = false;
+  }
+}
+
+// Whenever the poll picks up new photos while the admin panel is open, and
+// staff has already built a face index at least once, index just the new
+// arrivals in the background automatically — no need to click the button
+// again every time new photos land. (Only runs while the admin panel tab
+// is open, so guests' phones never pay for this work.)
+async function autoIndexNewPhotos(newFiles){
+  if(newFiles.length === 0 || isIndexing) return;
+  const existing = await getFaceIndexCache();
+  if(Object.keys(existing).length === 0) return; // staff hasn't opted in yet
+  const statusEl = document.getElementById('faceIndexStatus');
+  try{ await indexFiles(newFiles, statusEl, { auto: true }); }catch(err){ /* stays quiet, manual button can retry */ }
 }
 
 async function fetchImageAsBlobUrl(fileId){
@@ -903,6 +1010,12 @@ async function refresh(){
       newIds = new Set(files.map(f => f.id).filter(id => !knownFileIds.has(id)));
       if(newIds.size > 0){
         showToast(lang === 'th' ? `มีรูปใหม่ ${newIds.size} รูป` : `${newIds.size} new photo${newIds.size > 1 ? 's' : ''}`);
+        // Keep the face index current automatically as new photos land —
+        // only while staff has the admin panel open, so guests' phones
+        // never pay for this work in the background.
+        if(adminWrap.classList.contains('show')){
+          autoIndexNewPhotos(files.filter(f => newIds.has(f.id)));
+        }
       }
     }
     knownFileIds = new Set(files.map(f => f.id));
@@ -1195,8 +1308,8 @@ async function handleFaceSearchFile(file){
   let detection;
   try{
     const img = await loadImageFromUrl(blobUrl);
-    const resized = resizeImageToCanvas(img, 800);
-    detection = await faceapi.detectSingleFace(resized, fastDetectorOptions())
+    const capped = capImageSize(img, 1600);
+    detection = await faceapi.detectSingleFace(capped, guestSearchDetectorOptions())
       .withFaceLandmarks().withFaceDescriptor();
   }catch(err){
     faceSearchStatus.textContent = 'วิเคราะห์ภาพไม่สำเร็จ ลองใหม่อีกครั้ง';
@@ -1217,7 +1330,7 @@ async function handleFaceSearchFile(file){
     return;
   }
 
-  const threshold = 0.55;
+  const threshold = FACE_MATCH_THRESHOLD;
   const matchIds = [];
   for(const [fileId, descriptors] of Object.entries(faceIndex)){
     for(const d of (descriptors || [])){
@@ -1255,61 +1368,14 @@ document.getElementById('clearFaceFilterBtn').addEventListener('click', () => {
 document.getElementById('buildFaceIndexBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('faceIndexStatus');
   statusEl.textContent = 'กำลังโหลดโมเดล (ครั้งแรกอาจใช้เวลาสักครู่)...';
-  try{ await ensureFaceApiLoaded(); }catch(err){ statusEl.textContent = err.message; return; }
-
-  const existing = (await loadSetting(FACE_INDEX_KEY, true)) || {};
-  const toProcess = currentFiles.filter(f => !(f.id in existing));
-  if(toProcess.length === 0){
-    statusEl.textContent = `ดัชนีครบถ้วนแล้ว (${Object.keys(existing).length} รูป) ไม่มีรูปใหม่ต้องสแกน`;
-    return;
-  }
-
-  // Run several photos through fetch+detect at once instead of waiting for
-  // each one to fully finish before starting the next — this is the main
-  // reason indexing used to feel slow. Downloading and analyzing are both
-  // mostly "waiting" work (network / decode), so a handful of them can
-  // overlap safely without overloading the browser or the Drive API.
-  const CONCURRENCY = 5;
-  let completed = 0;
-  let nextIndex = 0;
-
-  async function processOne(f){
-    let blobUrl;
-    try{
-      blobUrl = await fetchImageAsBlobUrl(f.id);
-      const img = await loadImageFromUrl(blobUrl);
-      const resized = resizeImageToCanvas(img, 1000);
-      const detections = await faceapi.detectAllFaces(resized, fastDetectorOptions())
-        .withFaceLandmarks().withFaceDescriptors();
-      existing[f.id] = detections.map(d => Array.from(d.descriptor));
-    }catch(err){
-      existing[f.id] = [];
-    }finally{
-      if(blobUrl) URL.revokeObjectURL(blobUrl);
-    }
-    completed++;
-    statusEl.textContent = `กำลังสแกนใบหน้า ${completed} / ${toProcess.length} รูป...`;
-    // Save progress every so often so a closed tab / lost connection
-    // doesn't throw away a long scan — not on every single photo, to
-    // avoid hammering the database with writes.
-    if(completed % 20 === 0){ await saveSetting(FACE_INDEX_KEY, existing); }
-  }
-
-  async function worker(){
-    while(nextIndex < toProcess.length){
-      const f = toProcess[nextIndex++];
-      await processOne(f);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, toProcess.length) }, worker));
-  await saveSetting(FACE_INDEX_KEY, existing);
-  statusEl.textContent = `สแกนเสร็จแล้ว ${toProcess.length} รูปใหม่ — รวมดัชนีทั้งหมด ${Object.keys(existing).length} รูป`;
+  try{ await indexFiles(currentFiles, statusEl); }
+  catch(err){ statusEl.textContent = err.message || 'เกิดข้อผิดพลาด ลองอีกครั้ง'; }
 });
 
 document.getElementById('resetFaceIndexBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('faceIndexStatus');
   statusEl.textContent = 'กำลังล้างดัชนี...';
+  faceIndexCache = null;
   await saveSetting(FACE_INDEX_KEY, null);
   statusEl.textContent = 'ล้างดัชนีแล้ว — กด "สร้าง/อัพเดตดัชนีใบหน้า" เพื่อสแกนใหม่ทั้งหมด';
 });
