@@ -149,6 +149,16 @@
   .status-banner.error{ background:#FBEAE7; color:var(--err); }
   .status-banner.loading{ background:var(--accent-soft); color:var(--ink-soft); }
 
+  .face-filter-bar{
+    display:flex; align-items:center; gap:10px; font-size:11.5px; color:var(--ink);
+    background:var(--accent-soft); border-radius:10px; padding:9px 12px; margin-bottom:12px;
+  }
+  .face-filter-bar button{
+    margin-left:auto; font-family:'Noto Serif Thai', serif; font-size:11px; font-weight:600;
+    background:var(--card); border:1px solid var(--line); color:var(--ink); padding:5px 11px;
+    border-radius:999px; cursor:pointer; flex-shrink:0;
+  }
+
   .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; }
   .grid.dense{ grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); }
   .cell{ position:relative; width:100%; padding-bottom:133.33%; border-radius:14px; overflow:hidden; background:var(--accent-soft); cursor:pointer; }
@@ -325,6 +335,10 @@
     </div>
 
     <div class="status-banner" id="statusBanner"></div>
+    <div class="face-filter-bar hidden" id="faceFilterBar">
+      พบ <b id="faceFilterCount">0</b> รูปที่มีคุณ
+      <button id="clearFaceFilterBtn">ล้างการค้นหา</button>
+    </div>
     <div class="grid" id="grid"></div>
   </div>
 </div>
@@ -347,6 +361,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
     <span id="lblLang">Language</span>
   </button>
+  <button class="toolbar-btn" id="btnFaceSearch">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5a2 2 0 0 1 2-2h2M4 17v2a2 2 0 0 0 2 2h2M20 7V5a2 2 0 0 0-2-2h-2M20 17v2a2 2 0 0 1-2 2h-2"/><circle cx="12" cy="11" r="3"/><path d="M8 17c0-2 2-3 4-3s4 1 4 3"/></svg>
+    <span>ค้นหาหน้า</span>
+  </button>
 </div>
 
 <!-- QR modal -->
@@ -367,6 +385,26 @@
     <div id="downloadList" style="text-align:left; max-height:260px; overflow-y:auto; margin-bottom:10px;"></div>
     <div class="modal-hint" id="downloadProgressText">0 / 0 เสร็จแล้ว</div>
     <a id="manualDownloadLink" href="#" download style="display:none; margin-top:10px; font-size:12px; font-weight:600; color:var(--accent); text-decoration:underline;">แตะที่นี่เพื่อดาวน์โหลด ถ้าไม่เริ่มอัตโนมัติ</a>
+  </div>
+</div>
+
+<!-- Face search modal -->
+<div class="modal-overlay" id="faceSearchModal">
+  <div class="modal-box" style="max-width:340px;">
+    <button class="modal-close" id="faceSearchModalClose">✕</button>
+    <h3>ค้นหาภาพด้วยใบหน้า</h3>
+    <div class="modal-hint" style="margin-bottom:14px;">ถ่ายภาพหรืออัพโหลดภาพใบหน้าของคุณ เพื่อค้นหารูปที่คุณอยู่ในอัลบั้ม</div>
+    <div style="display:flex; gap:10px; margin-bottom:12px;">
+      <label class="admin-btn" style="flex:1; text-align:center; cursor:pointer; display:block;">
+        📷 ถ่ายภาพใบหน้า
+        <input type="file" accept="image/*" capture="user" id="faceCaptureInput" style="display:none;">
+      </label>
+      <label class="admin-btn" style="flex:1; text-align:center; cursor:pointer; display:block; background:var(--accent);">
+        🖼️ ใช้ภาพใบหน้า
+        <input type="file" accept="image/*" id="faceUploadInput" style="display:none;">
+      </label>
+    </div>
+    <div class="modal-hint" id="faceSearchStatus"></div>
   </div>
 </div>
 
@@ -490,6 +528,18 @@
       <button class="admin-btn" id="folderResetBtn" style="background:var(--err);">รีเซ็ต</button>
       <span class="admin-status" id="folderStatus"></span>
     </div>
+  </div>
+
+  <div class="admin-card">
+    <h2>ดัชนีค้นหาใบหน้า</h2>
+    <div class="admin-field" style="margin-bottom:10px;">
+      <label>สแกนหาใบหน้าในทุกรูปของอัลบั้มไว้ล่วงหน้า เพื่อให้แขกค้นหารูปตัวเองได้ (ทำครั้งเดียว รูปใหม่ที่เพิ่มเข้ามาทีหลังต้องกดสแกนซ้ำ)</label>
+    </div>
+    <div class="admin-save-row">
+      <button class="admin-btn" id="buildFaceIndexBtn">สร้าง/อัพเดตดัชนีใบหน้า</button>
+      <button class="admin-btn" id="resetFaceIndexBtn" style="background:var(--err);">ล้างดัชนี</button>
+    </div>
+    <div class="admin-status" id="faceIndexStatus" style="margin-top:8px;"></div>
   </div>
 
   <div class="admin-card">
@@ -623,6 +673,7 @@ function renderMeta(files){
 
 function renderGrid(files, newIds){
   newIds = newIds || new Set();
+  displayedFiles = files;
   grid.innerHTML = '';
   if(files.length === 0){
     const note = document.createElement('div');
@@ -700,6 +751,42 @@ function stopHeroSlideshow(){
   if(heroSlideshowTimer){ clearInterval(heroSlideshowTimer); heroSlideshowTimer = null; }
 }
 let heroSlideIndex = 0;
+let displayedFiles = [];
+let faceSearchActive = false;
+let faceSearchMatchIds = new Set();
+const FACE_INDEX_KEY = 'bws-gallery2:face-index';
+
+async function ensureFaceApiLoaded(){
+  if(window.faceapi) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('โหลดไลบรารีจดจำใบหน้าไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต'));
+    document.head.appendChild(s);
+  });
+  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+}
+
+function loadImageFromUrl(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ'));
+    img.src = src;
+  });
+}
+
+async function fetchImageAsBlobUrl(fileId){
+  const mediaUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${API_KEY}`;
+  const res = await fetch(mediaUrl);
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
 function startHeroSlideshow(){
   stopHeroSlideshow();
   if(currentFiles.length === 0) return;
@@ -765,6 +852,11 @@ function renderAdminPreview(files){
   });
 }
 
+function renderCurrentGrid(){
+  const filesToShow = faceSearchActive ? currentFiles.filter(f => faceSearchMatchIds.has(f.id)) : currentFiles;
+  renderGrid(filesToShow, new Set());
+}
+
 async function refresh(){
   if(!FOLDER_ID){
     currentFiles = [];
@@ -794,7 +886,9 @@ async function refresh(){
 
     currentFiles = files;
     renderMeta(files);
-    renderGrid(files, newIds);
+    const filesToShow = faceSearchActive ? files.filter(f => faceSearchMatchIds.has(f.id)) : files;
+    if(faceSearchActive){ document.getElementById('faceFilterCount').textContent = filesToShow.length; }
+    renderGrid(filesToShow, newIds);
     renderAdminPreview(files);
     renderHero();
     hideBanner();
@@ -823,11 +917,11 @@ document.getElementById('lightboxClose').addEventListener('click', closeLightbox
 lightbox.addEventListener('click', (e) => { if(e.target===lightbox) closeLightbox(); });
 
 function showLightboxAt(index){
-  if(currentFiles.length === 0) return;
-  if(index < 0) index = currentFiles.length - 1;
-  if(index >= currentFiles.length) index = 0;
+  if(displayedFiles.length === 0) return;
+  if(index < 0) index = displayedFiles.length - 1;
+  if(index >= displayedFiles.length) index = 0;
   lightboxIndex = index;
-  const f = currentFiles[index];
+  const f = displayedFiles[index];
 
   // Show the grid-size thumbnail immediately (already cached from the
   // grid, so this paints instantly), then swap to the full-res version
@@ -846,8 +940,8 @@ function showLightboxAt(index){
   // Preload the neighboring photos (both sizes) so the next/prev tap
   // shows an already-cached image instead of waiting on a fresh request.
   [index - 2, index - 1, index + 1, index + 2].forEach(ni => {
-    if(ni < 0 || ni >= currentFiles.length) return;
-    const nf = currentFiles[ni];
+    if(ni < 0 || ni >= displayedFiles.length) return;
+    const nf = displayedFiles[ni];
     new Image().src = thumbUrl(nf.id, 400);
     new Image().src = thumbUrl(nf.id, 1200);
   });
@@ -886,7 +980,7 @@ btnSelect.addEventListener('click', () => {
   btnSelect.classList.toggle('active-toggle', selectMode);
   lblSelect.textContent = selectMode ? STRINGS[lang].doneSelect : STRINGS[lang].select;
   document.getElementById('selectAllBtn').classList.toggle('hidden', !selectMode);
-  if(!selectMode){ selectedIds.clear(); renderGrid(currentFiles); }
+  if(!selectMode){ selectedIds.clear(); renderCurrentGrid(); }
 });
 
 document.getElementById('selectAllBtn').addEventListener('click', () => {
@@ -896,7 +990,7 @@ document.getElementById('selectAllBtn').addEventListener('click', () => {
   } else {
     currentFiles.forEach(f => selectedIds.add(f.id));
   }
-  renderGrid(currentFiles);
+  renderCurrentGrid();
   updateSelectAllLabel();
 });
 function updateSelectAllLabel(){
@@ -1048,7 +1142,7 @@ function applyLangStrings(){
   document.getElementById('qrModalTitle').textContent = t.qrTitle;
   document.getElementById('qrModalHint').textContent = t.qrHint;
   renderMeta(currentFiles);
-  renderGrid(currentFiles);
+  renderCurrentGrid();
 }
 function toggleLang(){
   lang = lang === 'th' ? 'en' : 'th';
@@ -1057,6 +1151,121 @@ function toggleLang(){
 }
 langPillTop.addEventListener('click', toggleLang);
 btnLang.addEventListener('click', toggleLang);
+
+// ---- face search ----
+const faceSearchModal = document.getElementById('faceSearchModal');
+const faceSearchStatus = document.getElementById('faceSearchStatus');
+document.getElementById('btnFaceSearch').addEventListener('click', () => {
+  faceSearchStatus.textContent = '';
+  faceSearchModal.classList.add('open');
+});
+document.getElementById('faceSearchModalClose').addEventListener('click', () => faceSearchModal.classList.remove('open'));
+faceSearchModal.addEventListener('click', (e) => { if(e.target === faceSearchModal) faceSearchModal.classList.remove('open'); });
+
+async function handleFaceSearchFile(file){
+  if(!file) return;
+  faceSearchStatus.textContent = 'กำลังโหลดระบบจดจำใบหน้า (ครั้งแรกอาจใช้เวลาสักครู่)...';
+  try{ await ensureFaceApiLoaded(); }catch(err){ faceSearchStatus.textContent = err.message; return; }
+
+  faceSearchStatus.textContent = 'กำลังวิเคราะห์ใบหน้าของคุณ...';
+  const blobUrl = URL.createObjectURL(file);
+  let detection;
+  try{
+    const img = await loadImageFromUrl(blobUrl);
+    detection = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks().withFaceDescriptor();
+  }catch(err){
+    faceSearchStatus.textContent = 'วิเคราะห์ภาพไม่สำเร็จ ลองใหม่อีกครั้ง';
+    URL.revokeObjectURL(blobUrl);
+    return;
+  }
+  URL.revokeObjectURL(blobUrl);
+
+  if(!detection){
+    faceSearchStatus.textContent = 'ไม่พบใบหน้าในภาพ ลองถ่าย/เลือกภาพใหม่ที่เห็นหน้าชัดๆ';
+    return;
+  }
+
+  faceSearchStatus.textContent = 'กำลังค้นหาในอัลบั้ม...';
+  const faceIndex = (await loadSetting(FACE_INDEX_KEY, true)) || {};
+  if(Object.keys(faceIndex).length === 0){
+    faceSearchStatus.textContent = 'ยังไม่มีดัชนีใบหน้า — แจ้งทีมงานให้กดสร้างดัชนีในหลังบ้านก่อน';
+    return;
+  }
+
+  const threshold = 0.55;
+  const matchIds = [];
+  for(const [fileId, descriptors] of Object.entries(faceIndex)){
+    for(const d of (descriptors || [])){
+      const dist = faceapi.euclideanDistance(detection.descriptor, Float32Array.from(d));
+      if(dist < threshold){ matchIds.push(fileId); break; }
+    }
+  }
+
+  if(matchIds.length === 0){
+    faceSearchStatus.textContent = 'ไม่พบรูปที่มีคุณในอัลบั้ม ลองมุมอื่นดู หรืออาจยังไม่ได้อัพเดตดัชนี';
+    return;
+  }
+
+  faceSearchActive = true;
+  faceSearchMatchIds = new Set(matchIds);
+  faceSearchModal.classList.remove('open');
+  document.getElementById('faceFilterCount').textContent = matchIds.length;
+  document.getElementById('faceFilterBar').classList.remove('hidden');
+  const filesToShow = currentFiles.filter(f => faceSearchMatchIds.has(f.id));
+  renderGrid(filesToShow, new Set());
+  showToast(`พบ ${matchIds.length} รูปที่มีคุณ`);
+}
+
+document.getElementById('faceCaptureInput').addEventListener('change', (e) => handleFaceSearchFile(e.target.files[0]));
+document.getElementById('faceUploadInput').addEventListener('change', (e) => handleFaceSearchFile(e.target.files[0]));
+
+document.getElementById('clearFaceFilterBtn').addEventListener('click', () => {
+  faceSearchActive = false;
+  faceSearchMatchIds = new Set();
+  document.getElementById('faceFilterBar').classList.add('hidden');
+  renderGrid(currentFiles, new Set());
+});
+
+// ---- admin: build / reset face index ----
+document.getElementById('buildFaceIndexBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('faceIndexStatus');
+  statusEl.textContent = 'กำลังโหลดโมเดล (ครั้งแรกอาจใช้เวลาสักครู่)...';
+  try{ await ensureFaceApiLoaded(); }catch(err){ statusEl.textContent = err.message; return; }
+
+  const existing = (await loadSetting(FACE_INDEX_KEY, true)) || {};
+  const toProcess = currentFiles.filter(f => !(f.id in existing));
+  if(toProcess.length === 0){
+    statusEl.textContent = `ดัชนีครบถ้วนแล้ว (${Object.keys(existing).length} รูป) ไม่มีรูปใหม่ต้องสแกน`;
+    return;
+  }
+
+  for(let i = 0; i < toProcess.length; i++){
+    statusEl.textContent = `กำลังสแกนใบหน้า ${i + 1} / ${toProcess.length} รูป...`;
+    const f = toProcess[i];
+    let blobUrl;
+    try{
+      blobUrl = await fetchImageAsBlobUrl(f.id);
+      const img = await loadImageFromUrl(blobUrl);
+      const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks().withFaceDescriptors();
+      existing[f.id] = detections.map(d => Array.from(d.descriptor));
+    }catch(err){
+      existing[f.id] = [];
+    }finally{
+      if(blobUrl) URL.revokeObjectURL(blobUrl);
+    }
+  }
+  await saveSetting(FACE_INDEX_KEY, existing);
+  statusEl.textContent = `สแกนเสร็จแล้ว ${toProcess.length} รูปใหม่ — รวมดัชนีทั้งหมด ${Object.keys(existing).length} รูป`;
+});
+
+document.getElementById('resetFaceIndexBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('faceIndexStatus');
+  statusEl.textContent = 'กำลังล้างดัชนี...';
+  await saveSetting(FACE_INDEX_KEY, null);
+  statusEl.textContent = 'ล้างดัชนีแล้ว — กด "สร้าง/อัพเดตดัชนีใบหน้า" เพื่อสแกนใหม่ทั้งหมด';
+});
 
 // ---- accent color ----
 function darken(hex, amount){
